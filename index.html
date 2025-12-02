@@ -6,7 +6,8 @@
     <title>HK Transport ETA | 香港交通到站</title>
     
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23E3001B'/%3E%3Cpath fill='%23ffffff' d='M15 25h70c2.8 0 5 2.2 5 5v40c0 2.8-2.2 5-5 5h-10v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-22v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-10c-2.8 0-5-2.2-5-5v-40c0-2.8 2.2-5 5-5zm8 8v18h24v-18h-24zm34 0v18h24v-18h-24z'/%3E%3C/svg%3E">
-    <link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23E3001B'/%3E%3Cpath fill='%23ffffff' d='M15 25h70c2.8 0 5 2.2 5 5v40c0 2.8-2.2 5-5 5h-10v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-22v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-10c-2.8 0-5-2.2-5-5v-40c0-2.8 2.2-5 5-5zm8 8v18h24v-18h-24zm34 0v18h24v-18h-24z'/%3E%3C/svg%3E">
+    
+    <link rel="apple-touch-icon" href="https://ui-avatars.com/api/?name=🚌&background=E3001B&color=fff&size=192&rounded=true&font-size=0.5">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
@@ -185,10 +186,10 @@
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
     
-    // [FIX] 固定 Key，未來不再更改，確保資料永久保存
+    // [FIX] 固定 Key
     const PERMANENT_STORAGE_KEY = 'hk_transport_user_favorites'; 
     
-    // 舊版本的 keys，用於遷移數據
+    // 舊版本的 keys
     const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10', 'hkbus_fav_v9'];
 
     let state = { 
@@ -202,7 +203,6 @@
     const getEl = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
-        // [FIX] 啟動時嘗試遷移舊數據
         migrateLegacyData();
         renderFavorites();
         
@@ -221,32 +221,24 @@
         }
     });
 
-    // [FIX] 資料遷移邏輯
+    // 資料遷移邏輯
     function migrateLegacyData() {
-        // 如果新 key 已經有資料，就不需要遷移
         if (localStorage.getItem(PERMANENT_STORAGE_KEY)) return;
 
-        // 遍歷舊 key，找到最新的那一份
         for (const oldKey of LEGACY_KEYS) {
             const oldData = localStorage.getItem(oldKey);
             if (oldData) {
                 try {
-                    console.log(`Migrating data from ${oldKey}...`);
                     const parsedData = JSON.parse(oldData);
-                    
-                    // 確保舊資料有新欄位 (避免 undefined)
                     const normalizedData = parsedData.map(item => ({
                         ...item,
                         region: item.region || '',
                         gmbRouteId: item.gmbRouteId || '',
                         gmbRouteSeq: item.gmbRouteSeq || '',
                         gmbStopSeq: item.gmbStopSeq || '',
-                        // 修正 company 名稱 (舊版可能是 'joint' 但缺欄位)
                         company: item.company || 'kmb'
                     }));
-
                     localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(normalizedData));
-                    // 遷移成功後，停止檢查更舊的版本
                     return; 
                 } catch (e) {
                     console.error("Migration failed:", e);
@@ -648,7 +640,7 @@
         listEl.innerHTML = html;
     }
 
-    // --- 4. 收藏功能 (使用固定 Key) ---
+    // --- 4. 收藏功能 ---
     function getFavs() { return JSON.parse(localStorage.getItem(PERMANENT_STORAGE_KEY) || '[]'); }
     function saveFavs(d) { localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(d)); renderFavorites(); }
 
