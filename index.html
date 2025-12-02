@@ -30,6 +30,29 @@
             border-bottom-right-radius: 20px;
         }
 
+        /* [UX New] 清除按鈕樣式 */
+        .clear-btn {
+            position: absolute;
+            right: 90px; /* 根據搜尋按鈕寬度調整位置 */
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            background-color: #e9ecef; /* 灰色背景 */
+            color: #6c757d;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 22px; /* 垂直置中文字 */
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 10;
+            display: none; /* 預設隱藏 */
+            font-size: 16px;
+        }
+        .clear-btn:active {
+            background-color: #ced4da;
+        }
+
         /* Grid 佈局 */
         #directionArea {
             display: grid;
@@ -92,13 +115,11 @@
         .btn-star.active { color: #ffc107; }
         .btn-remove-fav { color: #adb5bd; font-size: 1.2rem; padding: 5px 15px; }
 
-        /* 品牌標籤顏色 */
         .badge-kmb { background-color: #E3001B !important; color: white; }
         .badge-ctb { background-color: #F8C300 !important; color: black; }
-        .badge-gmb { background-color: #198754 !important; color: white; } /* 綠色小巴 */
+        .badge-gmb { background-color: #198754 !important; color: white; } 
         .badge-joint { background: linear-gradient(90deg, #E3001B 50%, #F8C300 50%); color: white; text-shadow: 0 0 2px black; }
 
-        /* 收藏卡片邊框 */
         .fav-card { margin-bottom: 10px; border-left: 5px solid #ccc; cursor: pointer; }
         .fav-card.kmb { border-left-color: #E3001B; }
         .fav-card.ctb { border-left-color: #F8C300; }
@@ -116,10 +137,13 @@
 <div class="app-container">
     <div class="search-box">
         <h5 class="mb-3 fw-bold text-center">香港交通實時到站 🚐</h5>
-        <div class="input-group mb-2">
+        <div class="input-group mb-2 position-relative">
             <span class="input-group-text bg-white border-end-0">🔍</span>
             <input type="text" id="routeInput" class="form-control border-start-0 ps-0" 
-                   placeholder="輸入路線 (如 1, 102)" style="text-transform:uppercase;" autocomplete="off">
+                   placeholder="輸入路線 (如 1, 102)" style="text-transform:uppercase; padding-right: 35px;" autocomplete="off">
+            
+            <div id="clearBtn" class="clear-btn" onclick="clearSearch()">×</div>
+            
             <button class="btn btn-primary px-4 fw-bold" onclick="handleSearch()">搜尋</button>
         </div>
         
@@ -163,11 +187,9 @@
 <script>
     const KMB_BASE = 'https://data.etabus.gov.hk/v1/transport/kmb';
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
-    // [修正] GMB Base URL 依據 PDF Spec 
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
-    const STORAGE_KEY = 'hkbus_fav_v11'; 
+    const STORAGE_KEY = 'hkbus_fav_v12'; 
 
-    // State 新增 gmbRouteId, gmbRouteSeq
     let state = { 
         company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
         kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '', stopName: ''
@@ -181,15 +203,29 @@
     document.addEventListener('DOMContentLoaded', () => {
         renderFavorites();
         const input = getEl('routeInput');
+        const clearBtn = getEl('clearBtn');
+
         if (input) {
+            // [UX New] 監聽輸入以顯示/隱藏清除按鈕
             input.addEventListener('input', (e) => {
-                if (e.target.value.trim() === '') resetToHome();
+                const val = e.target.value.trim();
+                clearBtn.style.display = val.length > 0 ? 'block' : 'none';
+                if (val === '') resetToHome();
             });
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter') handleSearch();
             });
         }
     });
+
+    // [UX New] 清除搜尋並重置
+    function clearSearch() {
+        const input = getEl('routeInput');
+        input.value = '';
+        getEl('clearBtn').style.display = 'none';
+        resetToHome();
+        input.focus(); // 重新聚焦，方便用戶立即輸入
+    }
 
     function resetToHome() {
         getEl('directionArea').innerHTML = '';
@@ -198,7 +234,7 @@
         getEl('favoritesSection').style.display = 'block';
     }
 
-    // --- 1. 智能搜尋 (含 GMB 修正邏輯) ---
+    // --- 1. 智能搜尋 ---
     async function handleSearch() {
         const route = getEl('routeInput').value.trim().toUpperCase();
         if (!route) return;
@@ -224,7 +260,6 @@
             if (gmbRouteCache) {
                 pGmb = Promise.resolve(gmbRouteCache);
             } else {
-                // GMB Route List API [cite: 885, 916]
                 pGmb = fetch(`${GMB_BASE}/route`).then(r => r.json()).then(j => { gmbRouteCache = j.data?.routes; return j.data?.routes; }).catch(()=>null);
             }
 
@@ -238,13 +273,13 @@
             let ctbRoutes = [];
             let gmbMatchedRegions = [];
 
-            // --- 處理 KMB ---
+            // --- KMB ---
             if (kmbList) {
                 kmbRoutes = kmbList.filter(r => r.route === route);
                 kmbRoutes.forEach(r => r.dir = r.bound === 'O' ? 'outbound' : 'inbound');
             }
 
-            // --- 處理 CTB ---
+            // --- CTB ---
             if (ctbRes && ctbRes.data) {
                 const d = Array.isArray(ctbRes.data) ? ctbRes.data : [ctbRes.data];
                 d.forEach(r => {
@@ -253,8 +288,7 @@
                 });
             }
 
-            // --- 處理 GMB (修正) ---
-            // GMB List 回傳結構: { "HKI": ["1","2"], "KLN": ["1","2"], "NT": ["1"] } [cite: 922]
+            // --- GMB ---
             if (gmbListObj) {
                 ['HKI', 'KLN', 'NT'].forEach(region => {
                     if (gmbListObj[region] && gmbListObj[region].includes(route)) {
@@ -263,7 +297,7 @@
                 });
             }
 
-            // A. 渲染巴士按鈕
+            // 巴士按鈕
             let usedCtbIndices = new Set(); 
             kmbRoutes.sort((a, b) => (String(a.service_type) === '1' ? -1 : 1));
 
@@ -290,8 +324,7 @@
                 }
             });
 
-            // B. 渲染小巴按鈕 (需額外呼叫 Route API 取得詳情)
-            // [cite: 941] Route API: GET /route/{region}/{route_code}
+            // 小巴按鈕
             if (gmbMatchedRegions.length > 0) {
                 const gmbDetailReqs = gmbMatchedRegions.map(reg => 
                     fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
@@ -300,24 +333,12 @@
                 
                 gmbDetails.forEach((res, idx) => {
                     if (res && res.data) {
-                        const region = gmbMatchedRegions[idx]; // 對應 region
+                        const region = gmbMatchedRegions[idx];
                         const regionLabel = region === 'HKI' ? '港島' : (region === 'KLN' ? '九龍' : '新界');
-                        
-                        // res.data 是一個 array (variations) [cite: 956]
                         res.data.forEach(variation => {
-                            // 每個 variation 有 directions (route_seq) [cite: 956]
                             if (variation.directions) {
                                 variation.directions.forEach(d => {
-                                    // 我們需要 route_id 和 route_seq 來查站點 
-                                    createGmbBtn(
-                                        route, 
-                                        variation.route_id, 
-                                        d.route_seq, 
-                                        d.dest_tc, 
-                                        region, 
-                                        regionLabel,
-                                        variation.description_tc // 路線描述 (如有)
-                                    );
+                                    createGmbBtn(route, variation.route_id, d.route_seq, d.dest_tc, region, regionLabel, variation.description_tc);
                                     hasResult = true;
                                 });
                             }
@@ -338,7 +359,6 @@
         }
     }
 
-    // 巴士按鈕
     function createDirBtn(route, company, dir, dest, serviceType, extraLabel, region = '') {
         let badgeHtml = '';
         if (company === 'joint') badgeHtml = `<span class="badge badge-joint">聯營</span>`;
@@ -359,11 +379,9 @@
         getEl('directionArea').insertAdjacentHTML('beforeend', html);
     }
 
-    // 小巴按鈕 (GMB 專用)
     function createGmbBtn(routeCode, routeId, routeSeq, dest, region, regionLabel, desc) {
         const badgeHtml = `<span class="badge badge-gmb">小巴</span><span class="badge bg-light text-dark border ms-1">${regionLabel}</span>`;
         const extra = desc ? `<div class="small text-muted mt-1">${desc}</div>` : '';
-        
         const html = `
             <button class="btn dir-btn bg-white shadow-sm"
                 onclick="loadGmbStops(this, '${routeCode}', ${routeId}, ${routeSeq}, '${dest}', '${region}')">
@@ -420,7 +438,7 @@
         } finally { loading.style.display = 'none'; }
     }
 
-    // --- 2b. 載入小巴站點 (GMB Handler) ---
+    // --- 2b. 載入小巴站點 ---
     async function loadGmbStops(btnEl, routeCode, routeId, routeSeq, destName, region) {
         document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
         if(btnEl) btnEl.classList.add('active-dir');
@@ -431,26 +449,21 @@
         getEl('loadingText').innerText = '載入站點...';
         list.innerHTML = '';
 
-        // 更新 state, 記錄 route_id, route_seq 用於 ETA 查詢
         state = { company: 'gmb', route: routeCode, dir: '', dest: destName, serviceType: '', region, gmbRouteId: routeId, gmbRouteSeq: routeSeq };
 
         try {
-            // GMB Route-Stop API: /route-stop/{route_id}/{route_seq} 
             const res = await fetch(`${GMB_BASE}/route-stop/${routeId}/${routeSeq}`);
             const json = await res.json();
             const stops = json.data?.route_stops || [];
 
             if (stops.length === 0) { list.innerHTML = '<p class="text-center mt-4">無站點資料</p>'; loading.style.display='none'; return; }
-
-            // GMB 站點列表已包含 name_tc [cite: 1160]，無需額外呼叫 Stop API，效能更好！
             renderGmbStopsList(stops, destName);
-
         } catch (e) {
             console.error(e); list.innerHTML = '<p class="text-danger text-center">載入失敗</p>';
         } finally { loading.style.display = 'none'; }
     }
 
-    // 渲染函數 - 巴士
+    // 渲染巴士站點
     async function renderStopsList(stops, destName, company) {
         const list = getEl('stopsList');
         list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
@@ -476,7 +489,7 @@
         getEl('loading').style.display = 'none';
     }
 
-    // 渲染函數 - 小巴
+    // 渲染小巴站點
     function renderGmbStopsList(stops, destName) {
         const list = getEl('stopsList');
         list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
@@ -484,12 +497,9 @@
         
         let html = '';
         stops.forEach(s => {
-            // GMB 依賴 stop_seq 查詢 ETA [cite: 1242]
             const isFav = favs.some(f => f.route == state.route && f.gmbRouteId == state.gmbRouteId && f.gmbStopSeq == s.stop_seq);
             const starClass = isFav ? 'active' : '';
             const starIcon = isFav ? '★' : '☆';
-            
-            // 傳遞 stop_seq 給 ETA 函數
             html += generateStopCardHtml(s.stop_seq, s.name_tc, '', '', s.stop_seq, starClass, starIcon, `openGmbEtaModal('${s.name_tc}', ${s.stop_seq})`);
         });
         list.insertAdjacentHTML('beforeend', html);
@@ -513,7 +523,6 @@
     async function openEtaModal(name, kmbId, ctbId) {
         setupModal(name, state.route, state.dest, state.company);
         const listEl = getEl('etaList');
-        
         try {
             const reqs = [];
             if (kmbId && kmbId !== 'null') {
@@ -535,18 +544,13 @@
     async function openGmbEtaModal(name, stopSeq) {
         setupModal(name, state.route, state.dest, 'gmb');
         const listEl = getEl('etaList');
-
         try {
-            // GMB ETA: /eta/route-stop/{route_id}/{route_seq}/{stop_seq} 
             const url = `${GMB_BASE}/eta/route-stop/${state.gmbRouteId}/${state.gmbRouteSeq}/${stopSeq}`;
             const res = await fetch(url);
             const json = await res.json();
-            // GMB ETA 結構: data.eta[] [cite: 1253]
             const etas = (json.data?.eta || []).map(i => ({...i, source: 'gmb'}));
-            
             renderEtaList(etas);
         } catch (e) {
-            console.error(e);
             listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>';
         }
     }
@@ -566,9 +570,8 @@
 
     function renderEtaList(validEtas) {
         const listEl = getEl('etaList');
-        // GMB 傳回的是 timestamp (ISO string) [cite: 1253]
         validEtas.sort((a, b) => {
-            const tA = a.eta || a.timestamp; // KMB/CTB use eta, GMB use timestamp
+            const tA = a.eta || a.timestamp;
             const tB = b.eta || b.timestamp;
             const dateA = tA ? new Date(tA) : new Date(8640000000000000);
             const dateB = tB ? new Date(tB) : new Date(8640000000000000);
@@ -593,11 +596,11 @@
             }
             
             const dateObj = new Date(timeData);
+            if (isNaN(dateObj.getTime())) return;
+
             const min = Math.max(0, Math.floor((dateObj - new Date()) / 60000));
             const timeStr = dateObj.toLocaleTimeString('zh-HK', {hour:'2-digit', minute:'2-digit'});
             let timeColor = (min <= 1) ? 'text-danger blinking' : 'text-success';
-
-            // GMB 不一定有 dest_tc, 使用 state.dest
             const dest = item.dest_tc || state.dest;
 
             html += `
@@ -626,7 +629,7 @@
         const item = { 
             route: state.route, company: state.company, dir: state.dir, 
             dest: state.dest, serviceType: state.serviceType, region: state.region,
-            gmbRouteId: state.gmbRouteId, gmbRouteSeq: state.gmbRouteSeq, // 必須儲存這些 GMB 專用ID
+            gmbRouteId: state.gmbRouteId, gmbRouteSeq: state.gmbRouteSeq,
             stopName: name, kmbStopId: kmbId, ctbStopId: ctbId, gmbStopSeq: gmbStopSeq
         };
         const idx = favs.findIndex(f => 
