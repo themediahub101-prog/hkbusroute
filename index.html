@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>HK Transport ETA | 香港交通到站</title>
+    
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23E3001B'/%3E%3Cpath fill='%23ffffff' d='M15 25h70c2.8 0 5 2.2 5 5v40c0 2.8-2.2 5-5 5h-10v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-22v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-10c-2.8 0-5-2.2-5-5v-40c0-2.8 2.2-5 5-5zm8 8v18h24v-18h-24zm34 0v18h24v-18h-24z'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23E3001B'/%3E%3Cpath fill='%23ffffff' d='M15 25h70c2.8 0 5 2.2 5 5v40c0 2.8-2.2 5-5 5h-10v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-22v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-10c-2.8 0-5-2.2-5-5v-40c0-2.8 2.2-5 5-5zm8 8v18h24v-18h-24zm34 0v18h24v-18h-24z'/%3E%3C/svg%3E">
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
@@ -17,7 +21,6 @@
             padding-bottom: 80px;
         }
         
-        /* --- 搜尋區塊 --- */
         .search-box {
             position: sticky;
             top: 0;
@@ -30,30 +33,26 @@
             border-bottom-right-radius: 20px;
         }
 
-        /* [UX New] 清除按鈕樣式 */
         .clear-btn {
             position: absolute;
-            right: 90px; /* 根據搜尋按鈕寬度調整位置 */
+            right: 90px;
             top: 50%;
             transform: translateY(-50%);
             width: 22px;
             height: 22px;
-            background-color: #e9ecef; /* 灰色背景 */
+            background-color: #e9ecef;
             color: #6c757d;
             border-radius: 50%;
             text-align: center;
-            line-height: 22px; /* 垂直置中文字 */
+            line-height: 22px;
             font-weight: bold;
             cursor: pointer;
             z-index: 10;
-            display: none; /* 預設隱藏 */
+            display: none;
             font-size: 16px;
         }
-        .clear-btn:active {
-            background-color: #ced4da;
-        }
+        .clear-btn:active { background-color: #ced4da; }
 
-        /* Grid 佈局 */
         #directionArea {
             display: grid;
             grid-template-columns: 1fr 1fr; 
@@ -79,7 +78,6 @@
         }
         .card-common:active { background-color: #f1f3f5; }
 
-        /* 按鈕樣式 */
         .dir-btn { 
             border: 1px solid #dee2e6; 
             height: 100%; 
@@ -117,7 +115,7 @@
 
         .badge-kmb { background-color: #E3001B !important; color: white; }
         .badge-ctb { background-color: #F8C300 !important; color: black; }
-        .badge-gmb { background-color: #198754 !important; color: white; } 
+        .badge-gmb { background-color: #198754 !important; color: white; }
         .badge-joint { background: linear-gradient(90deg, #E3001B 50%, #F8C300 50%); color: white; text-shadow: 0 0 2px black; }
 
         .fav-card { margin-bottom: 10px; border-left: 5px solid #ccc; cursor: pointer; }
@@ -141,9 +139,7 @@
             <span class="input-group-text bg-white border-end-0">🔍</span>
             <input type="text" id="routeInput" class="form-control border-start-0 ps-0" 
                    placeholder="輸入路線 (如 1, 102)" style="text-transform:uppercase; padding-right: 35px;" autocomplete="off">
-            
             <div id="clearBtn" class="clear-btn" onclick="clearSearch()">×</div>
-            
             <button class="btn btn-primary px-4 fw-bold" onclick="handleSearch()">搜尋</button>
         </div>
         
@@ -188,7 +184,12 @@
     const KMB_BASE = 'https://data.etabus.gov.hk/v1/transport/kmb';
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
-    const STORAGE_KEY = 'hkbus_fav_v12'; 
+    
+    // [FIX] 固定 Key，未來不再更改，確保資料永久保存
+    const PERMANENT_STORAGE_KEY = 'hk_transport_user_favorites'; 
+    
+    // 舊版本的 keys，用於遷移數據
+    const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10', 'hkbus_fav_v9'];
 
     let state = { 
         company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
@@ -201,12 +202,14 @@
     const getEl = (id) => document.getElementById(id);
 
     document.addEventListener('DOMContentLoaded', () => {
+        // [FIX] 啟動時嘗試遷移舊數據
+        migrateLegacyData();
         renderFavorites();
+        
         const input = getEl('routeInput');
         const clearBtn = getEl('clearBtn');
 
         if (input) {
-            // [UX New] 監聽輸入以顯示/隱藏清除按鈕
             input.addEventListener('input', (e) => {
                 const val = e.target.value.trim();
                 clearBtn.style.display = val.length > 0 ? 'block' : 'none';
@@ -218,13 +221,46 @@
         }
     });
 
-    // [UX New] 清除搜尋並重置
+    // [FIX] 資料遷移邏輯
+    function migrateLegacyData() {
+        // 如果新 key 已經有資料，就不需要遷移
+        if (localStorage.getItem(PERMANENT_STORAGE_KEY)) return;
+
+        // 遍歷舊 key，找到最新的那一份
+        for (const oldKey of LEGACY_KEYS) {
+            const oldData = localStorage.getItem(oldKey);
+            if (oldData) {
+                try {
+                    console.log(`Migrating data from ${oldKey}...`);
+                    const parsedData = JSON.parse(oldData);
+                    
+                    // 確保舊資料有新欄位 (避免 undefined)
+                    const normalizedData = parsedData.map(item => ({
+                        ...item,
+                        region: item.region || '',
+                        gmbRouteId: item.gmbRouteId || '',
+                        gmbRouteSeq: item.gmbRouteSeq || '',
+                        gmbStopSeq: item.gmbStopSeq || '',
+                        // 修正 company 名稱 (舊版可能是 'joint' 但缺欄位)
+                        company: item.company || 'kmb'
+                    }));
+
+                    localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(normalizedData));
+                    // 遷移成功後，停止檢查更舊的版本
+                    return; 
+                } catch (e) {
+                    console.error("Migration failed:", e);
+                }
+            }
+        }
+    }
+
     function clearSearch() {
         const input = getEl('routeInput');
         input.value = '';
         getEl('clearBtn').style.display = 'none';
         resetToHome();
-        input.focus(); // 重新聚焦，方便用戶立即輸入
+        input.focus();
     }
 
     function resetToHome() {
@@ -246,7 +282,6 @@
         getEl('stopsList').innerHTML = '';
 
         try {
-            // 1. KMB Cache
             let pKmb;
             if (kmbRouteCache) {
                 pKmb = Promise.resolve(kmbRouteCache);
@@ -255,7 +290,6 @@
                 pKmb = fetch(`${KMB_BASE}/route/`).then(r => r.json()).then(j => { kmbRouteCache = j.data; return j.data; }).catch(()=>null);
             }
 
-            // 2. GMB Cache
             let pGmb;
             if (gmbRouteCache) {
                 pGmb = Promise.resolve(gmbRouteCache);
@@ -263,7 +297,6 @@
                 pGmb = fetch(`${GMB_BASE}/route`).then(r => r.json()).then(j => { gmbRouteCache = j.data?.routes; return j.data?.routes; }).catch(()=>null);
             }
 
-            // 3. CTB Direct
             const pCtb = fetch(`${CTB_BASE}/route/ctb/${route}`).then(r => r.json()).catch(()=>null);
 
             const [kmbList, gmbListObj, ctbRes] = await Promise.all([pKmb, pGmb, pCtb]);
@@ -273,13 +306,11 @@
             let ctbRoutes = [];
             let gmbMatchedRegions = [];
 
-            // --- KMB ---
             if (kmbList) {
                 kmbRoutes = kmbList.filter(r => r.route === route);
                 kmbRoutes.forEach(r => r.dir = r.bound === 'O' ? 'outbound' : 'inbound');
             }
 
-            // --- CTB ---
             if (ctbRes && ctbRes.data) {
                 const d = Array.isArray(ctbRes.data) ? ctbRes.data : [ctbRes.data];
                 d.forEach(r => {
@@ -288,7 +319,6 @@
                 });
             }
 
-            // --- GMB ---
             if (gmbListObj) {
                 ['HKI', 'KLN', 'NT'].forEach(region => {
                     if (gmbListObj[region] && gmbListObj[region].includes(route)) {
@@ -297,7 +327,6 @@
                 });
             }
 
-            // 巴士按鈕
             let usedCtbIndices = new Set(); 
             kmbRoutes.sort((a, b) => (String(a.service_type) === '1' ? -1 : 1));
 
@@ -324,7 +353,6 @@
                 }
             });
 
-            // 小巴按鈕
             if (gmbMatchedRegions.length > 0) {
                 const gmbDetailReqs = gmbMatchedRegions.map(reg => 
                     fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
@@ -620,9 +648,9 @@
         listEl.innerHTML = html;
     }
 
-    // --- 4. 收藏功能 ---
-    function getFavs() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-    function saveFavs(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); renderFavorites(); }
+    // --- 4. 收藏功能 (使用固定 Key) ---
+    function getFavs() { return JSON.parse(localStorage.getItem(PERMANENT_STORAGE_KEY) || '[]'); }
+    function saveFavs(d) { localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(d)); renderFavorites(); }
 
     function toggleFav(name, kmbId, ctbId, gmbStopSeq, btn) {
         let favs = getFavs();
