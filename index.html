@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HK Transport ETA | 香港交通到站</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .app-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding-bottom: 80px;
+        }
+        
+        /* --- 搜尋區塊 --- */
+        .search-box {
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.98);
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            padding: 15px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+        }
+
+        /* Grid 佈局 */
+        #directionArea {
+            display: grid;
+            grid-template-columns: 1fr 1fr; 
+            gap: 10px;
+            max-height: 35vh;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding-right: 2px;
+        }
+
+        #directionArea::-webkit-scrollbar { width: 4px; }
+        #directionArea::-webkit-scrollbar-thumb { background-color: #dee2e6; border-radius: 4px; }
+
+        .fav-section { margin-top: 20px; padding: 0 15px; }
+        .fav-title { font-size: 0.9rem; color: #6c757d; margin-bottom: 10px; font-weight: 600; }
+
+        .card-common {
+            background: white;
+            border: 1px solid rgba(0,0,0,0.03);
+            border-radius: 12px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+            transition: background-color 0.2s;
+        }
+        .card-common:active { background-color: #f1f3f5; }
+
+        /* 按鈕樣式 */
+        .dir-btn { 
+            border: 1px solid #dee2e6; 
+            height: 100%; 
+            padding: 12px 5px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        .dir-btn.active-dir {
+            background-color: #e7f1ff !important;
+            border-color: #0d6efd !important;
+            color: #0d6efd;
+        }
+        .dir-btn-dest {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin: 5px 0;
+            line-height: 1.2;
+            word-break: break-word;
+        }
+
+        .stop-card { margin-bottom: 8px; cursor: pointer; padding-right: 5px; }
+        .stop-seq {
+            background-color: #e9ecef; color: #495057;
+            min-width: 28px; height: 28px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 13px;
+        }
+
+        .btn-star { background: none; border: none; font-size: 1.4rem; color: #dee2e6; padding: 8px 12px; cursor: pointer; z-index: 5; }
+        .btn-star.active { color: #ffc107; }
+        .btn-remove-fav { color: #adb5bd; font-size: 1.2rem; padding: 5px 15px; }
+
+        /* 品牌標籤顏色 */
+        .badge-kmb { background-color: #E3001B !important; color: white; }
+        .badge-ctb { background-color: #F8C300 !important; color: black; }
+        .badge-gmb { background-color: #198754 !important; color: white; } /* 綠色小巴 */
+        .badge-joint { background: linear-gradient(90deg, #E3001B 50%, #F8C300 50%); color: white; text-shadow: 0 0 2px black; }
+
+        /* 收藏卡片邊框 */
+        .fav-card { margin-bottom: 10px; border-left: 5px solid #ccc; cursor: pointer; }
+        .fav-card.kmb { border-left-color: #E3001B; }
+        .fav-card.ctb { border-left-color: #F8C300; }
+        .fav-card.gmb { border-left-color: #198754; }
+        .fav-card.joint { border-left: 5px solid; border-image: linear-gradient(to bottom, #E3001B 50%, #F8C300 50%) 1; }
+
+        .blinking { animation: blinker 1.5s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0.5; } }
+        .eta-time { font-size: 1.4rem; font-weight: bold; }
+        .eta-remark-only { font-size: 1.2rem; font-weight: bold; color: #6c757d; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div class="search-box">
+        <h5 class="mb-3 fw-bold text-center">香港交通實時到站 🚐</h5>
+        <div class="input-group mb-2">
+            <span class="input-group-text bg-white border-end-0">🔍</span>
+            <input type="text" id="routeInput" class="form-control border-start-0 ps-0" 
+                   placeholder="輸入路線 (如 1, 102)" style="text-transform:uppercase;" autocomplete="off">
+            <button class="btn btn-primary px-4 fw-bold" onclick="handleSearch()">搜尋</button>
+        </div>
+        
+        <div id="loading" class="text-center py-2" style="display:none;">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span id="loadingText" class="small text-muted ms-2">正在搜尋...</span>
+        </div>
+        
+        <div id="directionArea"></div>
+    </div>
+
+    <div id="favoritesSection" class="fav-section">
+        <div class="fav-title">★ 經常使用</div>
+        <div id="favoritesList">
+            <p class="text-muted small text-center py-3">暫無紀錄</p>
+        </div>
+    </div>
+
+    <div id="stopsList" class="px-3 pt-3 pb-5"></div>
+</div>
+
+<div class="modal fade" id="etaModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-0 pb-0">
+                <div>
+                    <h5 class="modal-title fw-bold" id="etaModalTitle">...</h5>
+                    <small class="text-muted" id="etaModalSubtitle">...</small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="etaList" class="list-group list-group-flush"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const KMB_BASE = 'https://data.etabus.gov.hk/v1/transport/kmb';
+    const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
+    // [修正] GMB Base URL 依據 PDF Spec 
+    const GMB_BASE = 'https://data.etagmb.gov.hk'; 
+    const STORAGE_KEY = 'hkbus_fav_v11'; 
+
+    // State 新增 gmbRouteId, gmbRouteSeq
+    let state = { 
+        company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
+        kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '', stopName: ''
+    };
+    
+    let kmbRouteCache = null;
+    let gmbRouteCache = null;
+
+    const getEl = (id) => document.getElementById(id);
+
+    document.addEventListener('DOMContentLoaded', () => {
+        renderFavorites();
+        const input = getEl('routeInput');
+        if (input) {
+            input.addEventListener('input', (e) => {
+                if (e.target.value.trim() === '') resetToHome();
+            });
+            input.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleSearch();
+            });
+        }
+    });
+
+    function resetToHome() {
+        getEl('directionArea').innerHTML = '';
+        getEl('stopsList').innerHTML = '';
+        getEl('loading').style.display = 'none';
+        getEl('favoritesSection').style.display = 'block';
+    }
+
+    // --- 1. 智能搜尋 (含 GMB 修正邏輯) ---
+    async function handleSearch() {
+        const route = getEl('routeInput').value.trim().toUpperCase();
+        if (!route) return;
+
+        getEl('favoritesSection').style.display = 'none';
+        getEl('loading').style.display = 'block';
+        getEl('loadingText').innerText = '正在搜尋...';
+        getEl('directionArea').innerHTML = '';
+        getEl('stopsList').innerHTML = '';
+
+        try {
+            // 1. KMB Cache
+            let pKmb;
+            if (kmbRouteCache) {
+                pKmb = Promise.resolve(kmbRouteCache);
+            } else {
+                getEl('loadingText').innerText = '正在下載路線資料...';
+                pKmb = fetch(`${KMB_BASE}/route/`).then(r => r.json()).then(j => { kmbRouteCache = j.data; return j.data; }).catch(()=>null);
+            }
+
+            // 2. GMB Cache
+            let pGmb;
+            if (gmbRouteCache) {
+                pGmb = Promise.resolve(gmbRouteCache);
+            } else {
+                // GMB Route List API [cite: 885, 916]
+                pGmb = fetch(`${GMB_BASE}/route`).then(r => r.json()).then(j => { gmbRouteCache = j.data?.routes; return j.data?.routes; }).catch(()=>null);
+            }
+
+            // 3. CTB Direct
+            const pCtb = fetch(`${CTB_BASE}/route/ctb/${route}`).then(r => r.json()).catch(()=>null);
+
+            const [kmbList, gmbListObj, ctbRes] = await Promise.all([pKmb, pGmb, pCtb]);
+            
+            let hasResult = false;
+            let kmbRoutes = [];
+            let ctbRoutes = [];
+            let gmbMatchedRegions = [];
+
+            // --- 處理 KMB ---
+            if (kmbList) {
+                kmbRoutes = kmbList.filter(r => r.route === route);
+                kmbRoutes.forEach(r => r.dir = r.bound === 'O' ? 'outbound' : 'inbound');
+            }
+
+            // --- 處理 CTB ---
+            if (ctbRes && ctbRes.data) {
+                const d = Array.isArray(ctbRes.data) ? ctbRes.data : [ctbRes.data];
+                d.forEach(r => {
+                    if (r.dest_tc) ctbRoutes.push({ dir: 'outbound', dest_tc: r.dest_tc, orig_tc: r.orig_tc });
+                    if (r.orig_tc) ctbRoutes.push({ dir: 'inbound', dest_tc: r.orig_tc, orig_tc: r.dest_tc });
+                });
+            }
+
+            // --- 處理 GMB (修正) ---
+            // GMB List 回傳結構: { "HKI": ["1","2"], "KLN": ["1","2"], "NT": ["1"] } [cite: 922]
+            if (gmbListObj) {
+                ['HKI', 'KLN', 'NT'].forEach(region => {
+                    if (gmbListObj[region] && gmbListObj[region].includes(route)) {
+                        gmbMatchedRegions.push(region);
+                    }
+                });
+            }
+
+            // A. 渲染巴士按鈕
+            let usedCtbIndices = new Set(); 
+            kmbRoutes.sort((a, b) => (String(a.service_type) === '1' ? -1 : 1));
+
+            kmbRoutes.forEach(k => {
+                const matchIndex = ctbRoutes.findIndex((c, idx) => 
+                    !usedCtbIndices.has(idx) && c.dir === k.dir && c.dest_tc === k.dest_tc
+                );
+                const sType = String(k.service_type || '');
+                const label = (sType && sType !== '1') ? `<span class="badge bg-secondary ms-1">班次 ${sType}</span>` : '';
+
+                if (matchIndex !== -1) {
+                    usedCtbIndices.add(matchIndex);
+                    createDirBtn(route, 'joint', k.dir, k.dest_tc, sType, label, '');
+                } else {
+                    createDirBtn(route, 'kmb', k.dir, k.dest_tc, sType, label, '');
+                }
+                hasResult = true;
+            });
+
+            ctbRoutes.forEach((c, idx) => {
+                if (!usedCtbIndices.has(idx)) {
+                    createDirBtn(route, 'ctb', c.dir, c.dest_tc, '', '', '');
+                    hasResult = true;
+                }
+            });
+
+            // B. 渲染小巴按鈕 (需額外呼叫 Route API 取得詳情)
+            // [cite: 941] Route API: GET /route/{region}/{route_code}
+            if (gmbMatchedRegions.length > 0) {
+                const gmbDetailReqs = gmbMatchedRegions.map(reg => 
+                    fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
+                );
+                const gmbDetails = await Promise.all(gmbDetailReqs);
+                
+                gmbDetails.forEach((res, idx) => {
+                    if (res && res.data) {
+                        const region = gmbMatchedRegions[idx]; // 對應 region
+                        const regionLabel = region === 'HKI' ? '港島' : (region === 'KLN' ? '九龍' : '新界');
+                        
+                        // res.data 是一個 array (variations) [cite: 956]
+                        res.data.forEach(variation => {
+                            // 每個 variation 有 directions (route_seq) [cite: 956]
+                            if (variation.directions) {
+                                variation.directions.forEach(d => {
+                                    // 我們需要 route_id 和 route_seq 來查站點 
+                                    createGmbBtn(
+                                        route, 
+                                        variation.route_id, 
+                                        d.route_seq, 
+                                        d.dest_tc, 
+                                        region, 
+                                        regionLabel,
+                                        variation.description_tc // 路線描述 (如有)
+                                    );
+                                    hasResult = true;
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+
+            if (!hasResult) {
+                getEl('stopsList').innerHTML = `<div class="text-center text-muted mt-5">找不到路線 ${route}</div>`;
+            }
+
+        } catch (e) {
+            console.error(e);
+            getEl('stopsList').innerHTML = `<div class="text-center text-danger mt-5">網絡錯誤</div>`;
+        } finally {
+            getEl('loading').style.display = 'none';
+        }
+    }
+
+    // 巴士按鈕
+    function createDirBtn(route, company, dir, dest, serviceType, extraLabel, region = '') {
+        let badgeHtml = '';
+        if (company === 'joint') badgeHtml = `<span class="badge badge-joint">聯營</span>`;
+        else if (company === 'kmb') badgeHtml = `<span class="badge badge-kmb">九巴</span>`;
+        else if (company === 'ctb') badgeHtml = `<span class="badge badge-ctb">城巴</span>`;
+        
+        const html = `
+            <button class="btn dir-btn bg-white shadow-sm"
+                onclick="loadStops(this, '${route}', '${company}', '${dir}', '${serviceType}', '${dest}', '')">
+                <div class="mb-1">${badgeHtml}</div>
+                <div>
+                    <small class="text-muted d-block">往</small> 
+                    <div class="dir-btn-dest">${dest}</div>
+                    ${extraLabel}
+                </div>
+            </button>
+        `;
+        getEl('directionArea').insertAdjacentHTML('beforeend', html);
+    }
+
+    // 小巴按鈕 (GMB 專用)
+    function createGmbBtn(routeCode, routeId, routeSeq, dest, region, regionLabel, desc) {
+        const badgeHtml = `<span class="badge badge-gmb">小巴</span><span class="badge bg-light text-dark border ms-1">${regionLabel}</span>`;
+        const extra = desc ? `<div class="small text-muted mt-1">${desc}</div>` : '';
+        
+        const html = `
+            <button class="btn dir-btn bg-white shadow-sm"
+                onclick="loadGmbStops(this, '${routeCode}', ${routeId}, ${routeSeq}, '${dest}', '${region}')">
+                <div class="mb-1">${badgeHtml}</div>
+                <div>
+                    <small class="text-muted d-block">往</small> 
+                    <div class="dir-btn-dest">${dest}</div>
+                    ${extra}
+                </div>
+            </button>
+        `;
+        getEl('directionArea').insertAdjacentHTML('beforeend', html);
+    }
+
+    // --- 2a. 載入巴士站點 ---
+    async function loadStops(btnEl, route, company, dir, serviceType, destName, region) {
+        document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
+        if(btnEl) btnEl.classList.add('active-dir');
+
+        const list = getEl('stopsList');
+        const loading = getEl('loading');
+        loading.style.display = 'block';
+        getEl('loadingText').innerText = '載入站點...';
+        list.innerHTML = '';
+
+        state = { company, route, dir, dest: destName, serviceType, region, kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '' };
+
+        try {
+            let kmbStops = [], ctbStops = [];
+            const promises = [];
+
+            if (company === 'kmb' || company === 'joint') {
+                promises.push(fetch(`${KMB_BASE}/route-stop/${route}/${dir}/${serviceType}`).then(r=>r.json()).then(j=>kmbStops=j.data||[]));
+            }
+            if (company === 'ctb' || company === 'joint') {
+                promises.push(fetch(`${CTB_BASE}/route-stop/ctb/${route}/${dir}`).then(r=>r.json()).then(j=>ctbStops=j.data||[]));
+            }
+            await Promise.all(promises);
+
+            let displayStops = [];
+            if (company === 'kmb') displayStops = kmbStops.map(s => ({ ...s, kmbId: s.stop, ctbId: null }));
+            else if (company === 'ctb') displayStops = ctbStops.map(s => ({ ...s, ctbId: s.stop, kmbId: null }));
+            else { 
+                displayStops = kmbStops.map(k => {
+                    const c = ctbStops.find(ct => ct.seq == k.seq);
+                    return { ...k, kmbId: k.stop, ctbId: c ? c.stop : null };
+                });
+            }
+
+            if (displayStops.length === 0) { list.innerHTML = '<p class="text-center mt-4">無站點資料</p>'; loading.style.display='none'; return; }
+            renderStopsList(displayStops, destName, company);
+        } catch (e) {
+            console.error(e); list.innerHTML = '<p class="text-danger text-center">載入失敗</p>';
+        } finally { loading.style.display = 'none'; }
+    }
+
+    // --- 2b. 載入小巴站點 (GMB Handler) ---
+    async function loadGmbStops(btnEl, routeCode, routeId, routeSeq, destName, region) {
+        document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
+        if(btnEl) btnEl.classList.add('active-dir');
+
+        const list = getEl('stopsList');
+        const loading = getEl('loading');
+        loading.style.display = 'block';
+        getEl('loadingText').innerText = '載入站點...';
+        list.innerHTML = '';
+
+        // 更新 state, 記錄 route_id, route_seq 用於 ETA 查詢
+        state = { company: 'gmb', route: routeCode, dir: '', dest: destName, serviceType: '', region, gmbRouteId: routeId, gmbRouteSeq: routeSeq };
+
+        try {
+            // GMB Route-Stop API: /route-stop/{route_id}/{route_seq} 
+            const res = await fetch(`${GMB_BASE}/route-stop/${routeId}/${routeSeq}`);
+            const json = await res.json();
+            const stops = json.data?.route_stops || [];
+
+            if (stops.length === 0) { list.innerHTML = '<p class="text-center mt-4">無站點資料</p>'; loading.style.display='none'; return; }
+
+            // GMB 站點列表已包含 name_tc [cite: 1160]，無需額外呼叫 Stop API，效能更好！
+            renderGmbStopsList(stops, destName);
+
+        } catch (e) {
+            console.error(e); list.innerHTML = '<p class="text-danger text-center">載入失敗</p>';
+        } finally { loading.style.display = 'none'; }
+    }
+
+    // 渲染函數 - 巴士
+    async function renderStopsList(stops, destName, company) {
+        const list = getEl('stopsList');
+        list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
+        
+        const nameBase = (company === 'ctb') ? CTB_BASE : KMB_BASE;
+        const detailPromises = stops.map(async (item) => {
+            const queryId = item.kmbId || item.ctbId;
+            const r = await fetch(`${nameBase}/stop/${queryId}`);
+            const j = await r.json();
+            return { ...item, name: j.data?.name_tc || '未知站點' };
+        });
+        const finalStops = await Promise.all(detailPromises);
+        const favs = getFavs();
+
+        let html = '';
+        finalStops.forEach(s => {
+            const isFav = favs.some(f => f.route == state.route && f.dir == state.dir && (f.kmbStopId == s.kmbId || f.ctbStopId == s.ctbId));
+            const starClass = isFav ? 'active' : '';
+            const starIcon = isFav ? '★' : '☆';
+            html += generateStopCardHtml(s.seq, s.name, s.kmbId, s.ctbId, '', starClass, starIcon, `openEtaModal('${s.name}', '${s.kmbId||''}', '${s.ctbId||''}')`);
+        });
+        list.insertAdjacentHTML('beforeend', html);
+        getEl('loading').style.display = 'none';
+    }
+
+    // 渲染函數 - 小巴
+    function renderGmbStopsList(stops, destName) {
+        const list = getEl('stopsList');
+        list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
+        const favs = getFavs();
+        
+        let html = '';
+        stops.forEach(s => {
+            // GMB 依賴 stop_seq 查詢 ETA [cite: 1242]
+            const isFav = favs.some(f => f.route == state.route && f.gmbRouteId == state.gmbRouteId && f.gmbStopSeq == s.stop_seq);
+            const starClass = isFav ? 'active' : '';
+            const starIcon = isFav ? '★' : '☆';
+            
+            // 傳遞 stop_seq 給 ETA 函數
+            html += generateStopCardHtml(s.stop_seq, s.name_tc, '', '', s.stop_seq, starClass, starIcon, `openGmbEtaModal('${s.name_tc}', ${s.stop_seq})`);
+        });
+        list.insertAdjacentHTML('beforeend', html);
+    }
+
+    function generateStopCardHtml(seq, name, kmbId, ctbId, gmbStopSeq, starClass, starIcon, onClick) {
+        return `
+            <div class="card-common stop-card d-flex align-items-center position-relative">
+                <div class="flex-grow-1 p-3 d-flex align-items-center" onclick="${onClick}">
+                    <div class="stop-seq me-3">${seq}</div>
+                    <div class="fw-bold fs-5 text-dark">${name}</div>
+                </div>
+                <button class="btn-star ${starClass}" 
+                    onclick="toggleFav('${name}', '${kmbId||''}', '${ctbId||''}', '${gmbStopSeq||''}', this)">
+                    ${starIcon}
+                </button>
+            </div>`;
+    }
+
+    // --- 3a. ETA 查詢 (巴士) ---
+    async function openEtaModal(name, kmbId, ctbId) {
+        setupModal(name, state.route, state.dest, state.company);
+        const listEl = getEl('etaList');
+        
+        try {
+            const reqs = [];
+            if (kmbId && kmbId !== 'null') {
+                const sType = state.serviceType || '1';
+                reqs.push(fetch(`${KMB_BASE}/eta/${kmbId}/${state.route}/${sType}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'kmb'}))));
+            }
+            if (ctbId && ctbId !== 'null') {
+                reqs.push(fetch(`${CTB_BASE}/eta/ctb/${ctbId}/${state.route}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'ctb'}))));
+            }
+            const results = await Promise.all(reqs);
+            const allEtas = results.flat().filter(i => i.route === state.route);
+            renderEtaList(allEtas);
+        } catch (e) {
+            listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>';
+        }
+    }
+
+    // --- 3b. ETA 查詢 (小巴) ---
+    async function openGmbEtaModal(name, stopSeq) {
+        setupModal(name, state.route, state.dest, 'gmb');
+        const listEl = getEl('etaList');
+
+        try {
+            // GMB ETA: /eta/route-stop/{route_id}/{route_seq}/{stop_seq} 
+            const url = `${GMB_BASE}/eta/route-stop/${state.gmbRouteId}/${state.gmbRouteSeq}/${stopSeq}`;
+            const res = await fetch(url);
+            const json = await res.json();
+            // GMB ETA 結構: data.eta[] [cite: 1253]
+            const etas = (json.data?.eta || []).map(i => ({...i, source: 'gmb'}));
+            
+            renderEtaList(etas);
+        } catch (e) {
+            console.error(e);
+            listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>';
+        }
+    }
+
+    function setupModal(title, route, dest, company) {
+        const modal = new bootstrap.Modal(getEl('etaModal'));
+        getEl('etaModalTitle').innerText = title;
+        let sub = `${route} 往 ${dest}`;
+        if (company === 'gmb') sub = `[小巴] ${sub}`;
+        else if (company === 'joint') sub = `[聯營] ` + sub;
+        else if (company === 'kmb') sub = `[九巴] ` + sub;
+        else sub = `[城巴] ` + sub;
+        getEl('etaModalSubtitle').innerText = sub;
+        getEl('etaList').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+        modal.show();
+    }
+
+    function renderEtaList(validEtas) {
+        const listEl = getEl('etaList');
+        // GMB 傳回的是 timestamp (ISO string) [cite: 1253]
+        validEtas.sort((a, b) => {
+            const tA = a.eta || a.timestamp; // KMB/CTB use eta, GMB use timestamp
+            const tB = b.eta || b.timestamp;
+            const dateA = tA ? new Date(tA) : new Date(8640000000000000);
+            const dateB = tB ? new Date(tB) : new Date(8640000000000000);
+            return dateA - dateB;
+        });
+
+        if (validEtas.length === 0) { listEl.innerHTML = '<div class="p-4 text-center text-muted">暫無即時班次</div>'; return; }
+
+        let html = '';
+        validEtas.forEach(item => {
+            let badge = '';
+            if (item.source === 'gmb') badge = `<span class="badge badge-gmb me-2">小巴</span>`;
+            else if (item.source === 'kmb') badge = `<span class="badge badge-kmb me-2">九巴</span>`;
+            else badge = `<span class="badge badge-ctb me-2">城巴</span>`;
+            
+            const remark = item.rmk_tc || item.remarks_tc || ''; 
+            const timeData = item.eta || item.timestamp;
+
+            if (!timeData) {
+                html += `<div class="list-group-item d-flex align-items-center py-3">${badge}<span class="eta-remark-only">${remark || '未有班次'}</span></div>`;
+                return;
+            }
+            
+            const dateObj = new Date(timeData);
+            const min = Math.max(0, Math.floor((dateObj - new Date()) / 60000));
+            const timeStr = dateObj.toLocaleTimeString('zh-HK', {hour:'2-digit', minute:'2-digit'});
+            let timeColor = (min <= 1) ? 'text-danger blinking' : 'text-success';
+
+            // GMB 不一定有 dest_tc, 使用 state.dest
+            const dest = item.dest_tc || state.dest;
+
+            html += `
+                <div class="list-group-item d-flex justify-content-between align-items-center py-3">
+                    <div class="d-flex align-items-center">
+                        <span class="fs-2 fw-bold ${timeColor} me-2" style="min-width:40px">${min}</span> 
+                        <small class="text-muted">分鐘</small>
+                    </div>
+                    <div class="text-end">
+                        <div class="d-flex align-items-center justify-content-end mb-1">
+                            ${badge} <span class="eta-time text-dark">${timeStr}</span>
+                        </div>
+                        <div>${remark ? `<span class="badge bg-light text-dark border">${remark}</span>` : ''} <small class="text-muted ms-1">往 ${dest}</small></div>
+                    </div>
+                </div>`;
+        });
+        listEl.innerHTML = html;
+    }
+
+    // --- 4. 收藏功能 ---
+    function getFavs() { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+    function saveFavs(d) { localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); renderFavorites(); }
+
+    function toggleFav(name, kmbId, ctbId, gmbStopSeq, btn) {
+        let favs = getFavs();
+        const item = { 
+            route: state.route, company: state.company, dir: state.dir, 
+            dest: state.dest, serviceType: state.serviceType, region: state.region,
+            gmbRouteId: state.gmbRouteId, gmbRouteSeq: state.gmbRouteSeq, // 必須儲存這些 GMB 專用ID
+            stopName: name, kmbStopId: kmbId, ctbStopId: ctbId, gmbStopSeq: gmbStopSeq
+        };
+        const idx = favs.findIndex(f => 
+            f.route == item.route && f.dir == item.dir && f.region == item.region &&
+            (f.kmbStopId == kmbId || f.ctbStopId == ctbId || f.gmbStopSeq == gmbStopSeq)
+        );
+        if (idx === -1) { favs.push(item); btn.classList.add('active'); btn.innerText = '★'; } 
+        else { favs.splice(idx, 1); btn.classList.remove('active'); btn.innerText = '☆'; }
+        saveFavs(favs);
+    }
+
+    function renderFavorites() {
+        const list = getEl('favoritesList');
+        const favs = getFavs();
+        if (favs.length === 0) { list.innerHTML = '<p class="text-muted small text-center py-3">暫無收藏</p>'; return; }
+        let html = '';
+        favs.forEach((f, i) => {
+            let badgeClass = f.company;
+            if(badgeClass === 'gmb') badgeClass = 'gmb';
+            
+            html += `
+                <div class="card-common fav-card d-flex justify-content-between align-items-center p-3 ${badgeClass}" 
+                     onclick="loadFavEta(${i})">
+                    <div>
+                        <div class="mb-1">
+                            <span class="badge badge-${badgeClass} me-2">${f.route}</span>
+                            <span class="small text-muted">往 ${f.dest}</span>
+                        </div>
+                        <div class="fw-bold fs-5">${f.stopName}</div>
+                    </div>
+                    <div class="btn-remove-fav" onclick="removeFav(event, ${i})">&times;</div>
+                </div>
+            `;
+        });
+        list.innerHTML = html;
+    }
+
+    function removeFav(e, idx) {
+        e.stopPropagation(); if(!confirm('移除此收藏？')) return;
+        let favs = getFavs(); favs.splice(idx, 1); saveFavs(favs);
+    }
+
+    function loadFavEta(idx) {
+        const f = getFavs()[idx]; if (!f) return;
+        state = { 
+            company: f.company, route: f.route, dir: f.dir, dest: f.dest, 
+            serviceType: f.serviceType, region: f.region || '',
+            gmbRouteId: f.gmbRouteId || '', gmbRouteSeq: f.gmbRouteSeq || ''
+        };
+        if (f.company === 'gmb') {
+            openGmbEtaModal(f.stopName, f.gmbStopSeq);
+        } else {
+            openEtaModal(f.stopName, f.kmbStopId, f.ctbStopId);
+        }
+    }
+</script>
+
+</body>
+</html>
