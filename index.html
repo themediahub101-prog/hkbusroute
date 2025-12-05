@@ -6,7 +6,6 @@
     <title>HK Transport ETA | 香港交通到站</title>
     
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23E3001B'/%3E%3Cpath fill='%23ffffff' d='M15 25h70c2.8 0 5 2.2 5 5v40c0 2.8-2.2 5-5 5h-10v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-22v10c0 1.1-.9 2-2 2h-10c-1.1 0-2-.9-2-2v-10h-10c-2.8 0-5-2.2-5-5v-40c0-2.8 2.2-5 5-5zm8 8v18h24v-18h-24zm34 0v18h24v-18h-24z'/%3E%3C/svg%3E">
-    
     <link rel="apple-touch-icon" id="ios-icon" href="">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -63,7 +62,6 @@
             margin-top: 10px;
             padding-right: 2px;
         }
-
         #directionArea::-webkit-scrollbar { width: 4px; }
         #directionArea::-webkit-scrollbar-thumb { background-color: #dee2e6; border-radius: 4px; }
 
@@ -174,6 +172,9 @@
             </div>
             <div class="modal-body">
                 <div id="etaList" class="list-group list-group-flush"></div>
+                <div class="text-center mt-2 pb-2">
+                    <small class="text-muted" style="font-size: 0.75rem;">每 60 秒自動更新</small>
+                </div>
             </div>
         </div>
     </div>
@@ -182,44 +183,31 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
-    // [FIX] 自動生成 PNG 圖示的函式 (解決 iOS 不顯示問題)
     (function generateAppIcon() {
         try {
             const canvas = document.createElement('canvas');
-            canvas.width = 192;
-            canvas.height = 192;
+            canvas.width = 192; canvas.height = 192;
             const ctx = canvas.getContext('2d');
-
-            // 1. 畫紅色背景
-            ctx.fillStyle = '#E3001B';
-            ctx.fillRect(0, 0, 192, 192);
-
-            // 2. 畫上巴士 Emoji (使用系統原生字體，效果最好)
-            ctx.font = '100px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#E3001B'; ctx.fillRect(0, 0, 192, 192);
+            ctx.font = '100px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             ctx.fillText('🚌', 96, 100);
-
-            // 3. 轉換為 PNG 並寫入 Tag
             const dataUrl = canvas.toDataURL('image/png');
             const link = document.getElementById('ios-icon');
             if (link) link.href = dataUrl;
-        } catch (e) {
-            console.error('Icon generation failed', e);
-        }
+        } catch (e) {}
     })();
 
     const KMB_BASE = 'https://data.etabus.gov.hk/v1/transport/kmb';
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
     const PERMANENT_STORAGE_KEY = 'hk_transport_user_favorites'; 
-    const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10', 'hkbus_fav_v9'];
+    const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10'];
 
+    let etaRefreshInterval = null;
     let state = { 
         company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
         kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '', stopName: ''
     };
-    
     let kmbRouteCache = null;
     let gmbRouteCache = null;
 
@@ -228,9 +216,9 @@
     document.addEventListener('DOMContentLoaded', () => {
         migrateLegacyData();
         renderFavorites();
-        
         const input = getEl('routeInput');
         const clearBtn = getEl('clearBtn');
+        const modalEl = getEl('etaModal');
 
         if (input) {
             input.addEventListener('input', (e) => {
@@ -238,10 +226,12 @@
                 clearBtn.style.display = val.length > 0 ? 'block' : 'none';
                 if (val === '') resetToHome();
             });
-            input.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleSearch();
-            });
+            input.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
         }
+
+        modalEl.addEventListener('hidden.bs.modal', () => {
+            if (etaRefreshInterval) { clearInterval(etaRefreshInterval); etaRefreshInterval = null; }
+        });
     });
 
     function migrateLegacyData() {
@@ -252,40 +242,27 @@
                 try {
                     const parsedData = JSON.parse(oldData);
                     const normalizedData = parsedData.map(item => ({
-                        ...item,
-                        region: item.region || '',
-                        gmbRouteId: item.gmbRouteId || '',
-                        gmbRouteSeq: item.gmbRouteSeq || '',
-                        gmbStopSeq: item.gmbStopSeq || '',
-                        company: item.company || 'kmb'
+                        ...item, region: item.region || '', gmbRouteId: item.gmbRouteId || '', gmbRouteSeq: item.gmbRouteSeq || '', gmbStopSeq: item.gmbStopSeq || '', company: item.company || 'kmb'
                     }));
                     localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(normalizedData));
                     return; 
-                } catch (e) { console.error("Migration failed:", e); }
+                } catch (e) {}
             }
         }
     }
 
     function clearSearch() {
-        const input = getEl('routeInput');
-        input.value = '';
-        getEl('clearBtn').style.display = 'none';
-        resetToHome();
-        input.focus();
+        const input = getEl('routeInput'); input.value = ''; getEl('clearBtn').style.display = 'none'; resetToHome(); input.focus();
     }
 
     function resetToHome() {
-        getEl('directionArea').innerHTML = '';
-        getEl('stopsList').innerHTML = '';
-        getEl('loading').style.display = 'none';
-        getEl('favoritesSection').style.display = 'block';
+        getEl('directionArea').innerHTML = ''; getEl('stopsList').innerHTML = '';
+        getEl('loading').style.display = 'none'; getEl('favoritesSection').style.display = 'block';
     }
 
-    // --- 1. 智能搜尋 ---
     async function handleSearch() {
         const route = getEl('routeInput').value.trim().toUpperCase();
         if (!route) return;
-
         getEl('favoritesSection').style.display = 'none';
         getEl('loading').style.display = 'block';
         getEl('loadingText').innerText = '正在搜尋...';
@@ -293,35 +270,23 @@
         getEl('stopsList').innerHTML = '';
 
         try {
-            let pKmb;
-            if (kmbRouteCache) {
-                pKmb = Promise.resolve(kmbRouteCache);
-            } else {
-                getEl('loadingText').innerText = '正在下載路線資料...';
-                pKmb = fetch(`${KMB_BASE}/route/`).then(r => r.json()).then(j => { kmbRouteCache = j.data; return j.data; }).catch(()=>null);
-            }
+            let pKmb, pGmb;
+            if (kmbRouteCache) pKmb = Promise.resolve(kmbRouteCache);
+            else pKmb = fetch(`${KMB_BASE}/route/`).then(r => r.json()).then(j => { kmbRouteCache = j.data; return j.data; }).catch(()=>null);
 
-            let pGmb;
-            if (gmbRouteCache) {
-                pGmb = Promise.resolve(gmbRouteCache);
-            } else {
-                pGmb = fetch(`${GMB_BASE}/route`).then(r => r.json()).then(j => { gmbRouteCache = j.data?.routes; return j.data?.routes; }).catch(()=>null);
-            }
+            if (gmbRouteCache) pGmb = Promise.resolve(gmbRouteCache);
+            else pGmb = fetch(`${GMB_BASE}/route`).then(r => r.json()).then(j => { gmbRouteCache = j.data?.routes; return j.data?.routes; }).catch(()=>null);
 
             const pCtb = fetch(`${CTB_BASE}/route/ctb/${route}`).then(r => r.json()).catch(()=>null);
-
             const [kmbList, gmbListObj, ctbRes] = await Promise.all([pKmb, pGmb, pCtb]);
             
             let hasResult = false;
-            let kmbRoutes = [];
-            let ctbRoutes = [];
-            let gmbMatchedRegions = [];
+            let kmbRoutes = [], ctbRoutes = [], gmbMatchedRegions = [];
 
             if (kmbList) {
                 kmbRoutes = kmbList.filter(r => r.route === route);
                 kmbRoutes.forEach(r => r.dir = r.bound === 'O' ? 'outbound' : 'inbound');
             }
-
             if (ctbRes && ctbRes.data) {
                 const d = Array.isArray(ctbRes.data) ? ctbRes.data : [ctbRes.data];
                 d.forEach(r => {
@@ -329,12 +294,9 @@
                     if (r.orig_tc) ctbRoutes.push({ dir: 'inbound', dest_tc: r.orig_tc, orig_tc: r.dest_tc });
                 });
             }
-
             if (gmbListObj) {
                 ['HKI', 'KLN', 'NT'].forEach(region => {
-                    if (gmbListObj[region] && gmbListObj[region].includes(route)) {
-                        gmbMatchedRegions.push(region);
-                    }
+                    if (gmbListObj[region] && gmbListObj[region].includes(route)) gmbMatchedRegions.push(region);
                 });
             }
 
@@ -347,19 +309,18 @@
                 );
                 const sType = String(k.service_type || '');
                 const label = (sType && sType !== '1') ? `<span class="badge bg-secondary ms-1">班次 ${sType}</span>` : '';
-
                 if (matchIndex !== -1) {
                     usedCtbIndices.add(matchIndex);
-                    createDirBtn(route, 'joint', k.dir, k.dest_tc, sType, label, '');
+                    createDirBtn(route, 'joint', k.dir, k.dest_tc, sType, label);
                 } else {
-                    createDirBtn(route, 'kmb', k.dir, k.dest_tc, sType, label, '');
+                    createDirBtn(route, 'kmb', k.dir, k.dest_tc, sType, label);
                 }
                 hasResult = true;
             });
 
             ctbRoutes.forEach((c, idx) => {
                 if (!usedCtbIndices.has(idx)) {
-                    createDirBtn(route, 'ctb', c.dir, c.dest_tc, '', '', '');
+                    createDirBtn(route, 'ctb', c.dir, c.dest_tc, '', '');
                     hasResult = true;
                 }
             });
@@ -369,7 +330,6 @@
                     fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
                 );
                 const gmbDetails = await Promise.all(gmbDetailReqs);
-                
                 gmbDetails.forEach((res, idx) => {
                     if (res && res.data) {
                         const region = gmbMatchedRegions[idx];
@@ -386,13 +346,10 @@
                 });
             }
 
-            if (!hasResult) {
-                getEl('stopsList').innerHTML = `<div class="text-center text-muted mt-5">找不到路線 ${route}</div>`;
-            }
+            if (!hasResult) getEl('stopsList').innerHTML = `<div class="text-center text-muted mt-5">找不到路線 ${route}</div>`;
 
         } catch (e) {
-            console.error(e);
-            getEl('stopsList').innerHTML = `<div class="text-center text-danger mt-5">網絡錯誤</div>`;
+            console.error(e); getEl('stopsList').innerHTML = `<div class="text-center text-danger mt-5">網絡錯誤</div>`;
         } finally {
             getEl('loading').style.display = 'none';
         }
@@ -408,13 +365,8 @@
             <button class="btn dir-btn bg-white shadow-sm"
                 onclick="loadStops(this, '${route}', '${company}', '${dir}', '${serviceType}', '${dest}', '')">
                 <div class="mb-1">${badgeHtml}</div>
-                <div>
-                    <small class="text-muted d-block">往</small> 
-                    <div class="dir-btn-dest">${dest}</div>
-                    ${extraLabel}
-                </div>
-            </button>
-        `;
+                <div><small class="text-muted d-block">往</small><div class="dir-btn-dest">${dest}</div>${extraLabel}</div>
+            </button>`;
         getEl('directionArea').insertAdjacentHTML('beforeend', html);
     }
 
@@ -425,39 +377,24 @@
             <button class="btn dir-btn bg-white shadow-sm"
                 onclick="loadGmbStops(this, '${routeCode}', ${routeId}, ${routeSeq}, '${dest}', '${region}')">
                 <div class="mb-1">${badgeHtml}</div>
-                <div>
-                    <small class="text-muted d-block">往</small> 
-                    <div class="dir-btn-dest">${dest}</div>
-                    ${extra}
-                </div>
-            </button>
-        `;
+                <div><small class="text-muted d-block">往</small><div class="dir-btn-dest">${dest}</div>${extra}</div>
+            </button>`;
         getEl('directionArea').insertAdjacentHTML('beforeend', html);
     }
 
-    // --- 2a. 載入巴士站點 ---
-    async function loadStops(btnEl, route, company, dir, serviceType, destName, region) {
+    async function loadStops(btnEl, route, company, dir, serviceType, destName) {
         document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
         if(btnEl) btnEl.classList.add('active-dir');
+        getEl('loading').style.display = 'block'; getEl('loadingText').innerText = '載入站點...';
+        getEl('stopsList').innerHTML = '';
 
-        const list = getEl('stopsList');
-        const loading = getEl('loading');
-        loading.style.display = 'block';
-        getEl('loadingText').innerText = '載入站點...';
-        list.innerHTML = '';
-
-        state = { company, route, dir, dest: destName, serviceType, region, kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '' };
+        state = { company, route, dir, dest: destName, serviceType, region: '', kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '' };
 
         try {
             let kmbStops = [], ctbStops = [];
             const promises = [];
-
-            if (company === 'kmb' || company === 'joint') {
-                promises.push(fetch(`${KMB_BASE}/route-stop/${route}/${dir}/${serviceType}`).then(r=>r.json()).then(j=>kmbStops=j.data||[]));
-            }
-            if (company === 'ctb' || company === 'joint') {
-                promises.push(fetch(`${CTB_BASE}/route-stop/ctb/${route}/${dir}`).then(r=>r.json()).then(j=>ctbStops=j.data||[]));
-            }
+            if (company === 'kmb' || company === 'joint') promises.push(fetch(`${KMB_BASE}/route-stop/${route}/${dir}/${serviceType}`).then(r=>r.json()).then(j=>kmbStops=j.data||[]));
+            if (company === 'ctb' || company === 'joint') promises.push(fetch(`${CTB_BASE}/route-stop/ctb/${route}/${dir}`).then(r=>r.json()).then(j=>ctbStops=j.data||[]));
             await Promise.all(promises);
 
             let displayStops = [];
@@ -470,23 +407,16 @@
                 });
             }
 
-            if (displayStops.length === 0) { list.innerHTML = '<p class="text-center mt-4">無站點資料</p>'; loading.style.display='none'; return; }
+            if (displayStops.length === 0) { getEl('stopsList').innerHTML = '<p class="text-center mt-4">無站點資料</p>'; getEl('loading').style.display='none'; return; }
             renderStopsList(displayStops, destName, company);
-        } catch (e) {
-            console.error(e); list.innerHTML = '<p class="text-danger text-center">載入失敗</p>';
-        } finally { loading.style.display = 'none'; }
+        } catch (e) { getEl('stopsList').innerHTML = '<p class="text-danger text-center">載入失敗</p>'; getEl('loading').style.display = 'none'; }
     }
 
-    // --- 2b. 載入小巴站點 ---
     async function loadGmbStops(btnEl, routeCode, routeId, routeSeq, destName, region) {
         document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
         if(btnEl) btnEl.classList.add('active-dir');
-
-        const list = getEl('stopsList');
-        const loading = getEl('loading');
-        loading.style.display = 'block';
-        getEl('loadingText').innerText = '載入站點...';
-        list.innerHTML = '';
+        getEl('loading').style.display = 'block'; getEl('loadingText').innerText = '載入站點...';
+        getEl('stopsList').innerHTML = '';
 
         state = { company: 'gmb', route: routeCode, dir: '', dest: destName, serviceType: '', region, gmbRouteId: routeId, gmbRouteSeq: routeSeq };
 
@@ -494,15 +424,11 @@
             const res = await fetch(`${GMB_BASE}/route-stop/${routeId}/${routeSeq}`);
             const json = await res.json();
             const stops = json.data?.route_stops || [];
-
-            if (stops.length === 0) { list.innerHTML = '<p class="text-center mt-4">無站點資料</p>'; loading.style.display='none'; return; }
+            if (stops.length === 0) { getEl('stopsList').innerHTML = '<p class="text-center mt-4">無站點資料</p>'; getEl('loading').style.display='none'; return; }
             renderGmbStopsList(stops, destName);
-        } catch (e) {
-            console.error(e); list.innerHTML = '<p class="text-danger text-center">載入失敗</p>';
-        } finally { loading.style.display = 'none'; }
+        } catch (e) { getEl('stopsList').innerHTML = '<p class="text-danger text-center">載入失敗</p>'; getEl('loading').style.display = 'none'; }
     }
 
-    // 渲染巴士站點
     async function renderStopsList(stops, destName, company) {
         const list = getEl('stopsList');
         list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
@@ -528,12 +454,10 @@
         getEl('loading').style.display = 'none';
     }
 
-    // 渲染小巴站點
     function renderGmbStopsList(stops, destName) {
         const list = getEl('stopsList');
         list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
         const favs = getFavs();
-        
         let html = '';
         stops.forEach(s => {
             const isFav = favs.some(f => f.route == state.route && f.gmbRouteId == state.gmbRouteId && f.gmbStopSeq == s.stop_seq);
@@ -542,6 +466,7 @@
             html += generateStopCardHtml(s.stop_seq, s.name_tc, '', '', s.stop_seq, starClass, starIcon, `openGmbEtaModal('${s.name_tc}', ${s.stop_seq})`);
         });
         list.insertAdjacentHTML('beforeend', html);
+        getEl('loading').style.display = 'none';
     }
 
     function generateStopCardHtml(seq, name, kmbId, ctbId, gmbStopSeq, starClass, starIcon, onClick) {
@@ -551,47 +476,67 @@
                     <div class="stop-seq me-3">${seq}</div>
                     <div class="fw-bold fs-5 text-dark">${name}</div>
                 </div>
-                <button class="btn-star ${starClass}" 
-                    onclick="toggleFav('${name}', '${kmbId||''}', '${ctbId||''}', '${gmbStopSeq||''}', this)">
+                <button class="btn-star ${starClass}" onclick="toggleFav('${name}', '${kmbId||''}', '${ctbId||''}', '${gmbStopSeq||''}', this)">
                     ${starIcon}
                 </button>
             </div>`;
     }
 
-    // --- 3a. ETA 查詢 (巴士) ---
-    async function openEtaModal(name, kmbId, ctbId) {
+    function openEtaModal(name, kmbId, ctbId) {
+        if (etaRefreshInterval) clearInterval(etaRefreshInterval);
+        state.stopName = name; // Update current stop name for filter
         setupModal(name, state.route, state.dest, state.company);
+        updateBusEta(kmbId, ctbId);
+        etaRefreshInterval = setInterval(() => { updateBusEta(kmbId, ctbId); }, 60000);
+    }
+
+    function openGmbEtaModal(name, stopSeq) {
+        if (etaRefreshInterval) clearInterval(etaRefreshInterval);
+        state.stopName = name;
+        setupModal(name, state.route, state.dest, 'gmb');
+        updateGmbEta(stopSeq);
+        etaRefreshInterval = setInterval(() => { updateGmbEta(stopSeq); }, 60000);
+    }
+
+    // [FIX 2] Cache Busting added: ?t=${Date.now()}
+    async function updateBusEta(kmbId, ctbId) {
         const listEl = getEl('etaList');
+        const ts = Date.now();
         try {
             const reqs = [];
             if (kmbId && kmbId !== 'null') {
                 const sType = state.serviceType || '1';
-                reqs.push(fetch(`${KMB_BASE}/eta/${kmbId}/${state.route}/${sType}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'kmb'}))));
+                reqs.push(fetch(`${KMB_BASE}/eta/${kmbId}/${state.route}/${sType}?t=${ts}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'kmb'}))));
             }
             if (ctbId && ctbId !== 'null') {
-                reqs.push(fetch(`${CTB_BASE}/eta/ctb/${ctbId}/${state.route}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'ctb'}))));
+                reqs.push(fetch(`${CTB_BASE}/eta/ctb/${ctbId}/${state.route}?t=${ts}`).then(r=>r.json()).then(j=>(j.data||[]).map(i=>({...i, source:'ctb'}))));
             }
             const results = await Promise.all(reqs);
-            const allEtas = results.flat().filter(i => i.route === state.route);
+            
+            // [FIX 1] Filter out reverse direction AND terminating stop
+            const targetDir = state.dir === 'outbound' ? 'O' : 'I';
+            const allEtas = results.flat().filter(i => {
+                // Filter 1: Check Route & Direction
+                if (i.route !== state.route || i.dir !== targetDir) return false;
+                // Filter 2: If destination name equals current stop name, it's a terminating bus (Reverse trip arrival)
+                if (i.dest_tc === state.stopName) return false;
+                return true;
+            });
+
             renderEtaList(allEtas);
-        } catch (e) {
-            listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>';
-        }
+        } catch (e) { listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>'; }
     }
 
-    // --- 3b. ETA 查詢 (小巴) ---
-    async function openGmbEtaModal(name, stopSeq) {
-        setupModal(name, state.route, state.dest, 'gmb');
+    async function updateGmbEta(stopSeq) {
         const listEl = getEl('etaList');
+        const ts = Date.now();
         try {
-            const url = `${GMB_BASE}/eta/route-stop/${state.gmbRouteId}/${state.gmbRouteSeq}/${stopSeq}`;
+            const url = `${GMB_BASE}/eta/route-stop/${state.gmbRouteId}/${state.gmbRouteSeq}/${stopSeq}?t=${ts}`;
             const res = await fetch(url);
             const json = await res.json();
             const etas = (json.data?.eta || []).map(i => ({...i, source: 'gmb'}));
             renderEtaList(etas);
-        } catch (e) {
-            listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>';
-        }
+        } catch (e) { listEl.innerHTML = '<div class="p-3 text-danger text-center">無法讀取數據</div>'; }
     }
 
     function setupModal(title, route, dest, company) {
@@ -603,15 +548,17 @@
         else if (company === 'kmb') sub = `[九巴] ` + sub;
         else sub = `[城巴] ` + sub;
         getEl('etaModalSubtitle').innerText = sub;
-        getEl('etaList').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+        
+        if (!getEl('etaList').hasChildNodes() || getEl('etaList').innerHTML === '') {
+            getEl('etaList').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+        }
         modal.show();
     }
 
     function renderEtaList(validEtas) {
         const listEl = getEl('etaList');
         validEtas.sort((a, b) => {
-            const tA = a.eta || a.timestamp;
-            const tB = b.eta || b.timestamp;
+            const tA = a.eta || a.timestamp; const tB = b.eta || b.timestamp;
             const dateA = tA ? new Date(tA) : new Date(8640000000000000);
             const dateB = tB ? new Date(tB) : new Date(8640000000000000);
             return dateA - dateB;
@@ -630,7 +577,7 @@
             const timeData = item.eta || item.timestamp;
 
             if (!timeData) {
-                html += `<div class="list-group-item d-flex align-items-center py-3">${badge}<span class="eta-remark-only">${remark || '未有班次'}</span></div>`;
+                html += `<div class="list-group-item d-flex justify-content-between align-items-center py-3"><div class="d-flex align-items-center">${badge}<span class="eta-remark-only">${remark || '未有班次'}</span></div><div class="text-end text-muted small">往 ${item.dest_tc || state.dest}</div></div>`;
                 return;
             }
             
@@ -659,7 +606,6 @@
         listEl.innerHTML = html;
     }
 
-    // --- 4. 收藏功能 ---
     function getFavs() { return JSON.parse(localStorage.getItem(PERMANENT_STORAGE_KEY) || '[]'); }
     function saveFavs(d) { localStorage.setItem(PERMANENT_STORAGE_KEY, JSON.stringify(d)); renderFavorites(); }
 
@@ -688,20 +634,14 @@
         favs.forEach((f, i) => {
             let badgeClass = f.company;
             if(badgeClass === 'gmb') badgeClass = 'gmb';
-            
             html += `
-                <div class="card-common fav-card d-flex justify-content-between align-items-center p-3 ${badgeClass}" 
-                     onclick="loadFavEta(${i})">
+                <div class="card-common fav-card d-flex justify-content-between align-items-center p-3 ${badgeClass}" onclick="loadFavEta(${i})">
                     <div>
-                        <div class="mb-1">
-                            <span class="badge badge-${badgeClass} me-2">${f.route}</span>
-                            <span class="small text-muted">往 ${f.dest}</span>
-                        </div>
+                        <div class="mb-1"><span class="badge badge-${badgeClass} me-2">${f.route}</span><span class="small text-muted">往 ${f.dest}</span></div>
                         <div class="fw-bold fs-5">${f.stopName}</div>
                     </div>
                     <div class="btn-remove-fav" onclick="removeFav(event, ${i})">&times;</div>
-                </div>
-            `;
+                </div>`;
         });
         list.innerHTML = html;
     }
@@ -718,11 +658,8 @@
             serviceType: f.serviceType, region: f.region || '',
             gmbRouteId: f.gmbRouteId || '', gmbRouteSeq: f.gmbRouteSeq || ''
         };
-        if (f.company === 'gmb') {
-            openGmbEtaModal(f.stopName, f.gmbStopSeq);
-        } else {
-            openEtaModal(f.stopName, f.kmbStopId, f.ctbStopId);
-        }
+        if (f.company === 'gmb') openGmbEtaModal(f.stopName, f.gmbStopSeq);
+        else openEtaModal(f.stopName, f.kmbStopId, f.ctbStopId);
     }
 </script>
 
