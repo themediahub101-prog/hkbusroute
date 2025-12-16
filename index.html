@@ -66,7 +66,7 @@
         #directionArea::-webkit-scrollbar-thumb { background-color: #dee2e6; border-radius: 4px; }
 
         .fav-section { margin-top: 20px; padding: 0 15px; }
-        .fav-title { font-size: 0.9rem; color: #6c757d; margin-bottom: 10px; font-weight: 600; }
+        .fav-title { font-size: 0.85rem; color: #6c757d; margin-bottom: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 
         .card-common {
             background: white;
@@ -150,10 +150,22 @@
         <div id="directionArea"></div>
     </div>
 
-    <div id="favoritesSection" class="fav-section">
-        <div class="fav-title">★ 經常使用</div>
-        <div id="favoritesList">
-            <p class="text-muted small text-center py-3">暫無紀錄</p>
+    <div id="homeContainer">
+        
+        <div id="historySection" class="fav-section" style="display:none;">
+            <div class="fav-title">🕒 最近查看的站點</div>
+            <div id="historyList"></div>
+        </div>
+
+        <div id="sectionDivider" class="px-3 my-3" style="display:none;">
+            <hr class="border-secondary opacity-25 m-0">
+        </div>
+
+        <div id="favoritesSection" class="fav-section">
+            <div class="fav-title">★ 經常使用</div>
+            <div id="favoritesList">
+                <p class="text-muted small text-center py-3">暫無紀錄</p>
+            </div>
         </div>
     </div>
 
@@ -201,6 +213,7 @@
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
     const PERMANENT_STORAGE_KEY = 'hk_transport_user_favorites'; 
+    const HISTORY_STORAGE_KEY = 'hk_transport_user_history_v2'; // 更新 key 以區分舊版歷史
     const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10'];
 
     let etaRefreshInterval = null;
@@ -216,6 +229,8 @@
     document.addEventListener('DOMContentLoaded', () => {
         migrateLegacyData();
         renderFavorites();
+        renderHistory();
+        
         const input = getEl('routeInput');
         const clearBtn = getEl('clearBtn');
         const modalEl = getEl('etaModal');
@@ -257,13 +272,15 @@
 
     function resetToHome() {
         getEl('directionArea').innerHTML = ''; getEl('stopsList').innerHTML = '';
-        getEl('loading').style.display = 'none'; getEl('favoritesSection').style.display = 'block';
+        getEl('loading').style.display = 'none'; getEl('homeContainer').style.display = 'block';
+        renderFavorites();
+        renderHistory();
     }
 
     async function handleSearch() {
         const route = getEl('routeInput').value.trim().toUpperCase();
         if (!route) return;
-        getEl('favoritesSection').style.display = 'none';
+        getEl('homeContainer').style.display = 'none';
         getEl('loading').style.display = 'block';
         getEl('loadingText').innerText = '正在搜尋...';
         getEl('directionArea').innerHTML = '';
@@ -382,9 +399,60 @@
         getEl('directionArea').insertAdjacentHTML('beforeend', html);
     }
 
+    function addToHistory(item) {
+        let history = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
+        // Filter existing (based on Stop IDs or Name)
+        history = history.filter(h => !(
+            h.route === item.route && 
+            h.dir === item.dir && 
+            (h.kmbStopId == item.kmbStopId || h.ctbStopId == item.ctbStopId || h.gmbStopSeq == item.gmbStopSeq)
+        ));
+        history.unshift(item);
+        if (history.length > 3) history.pop();
+        localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history));
+        renderHistory();
+    }
+
+    function renderHistory() {
+        const list = getEl('historyList');
+        const section = getEl('historySection');
+        const div = getEl('sectionDivider');
+        const history = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
+        
+        if (history.length === 0) {
+            section.style.display = 'none'; div.style.display = 'none'; return;
+        }
+        section.style.display = 'block'; div.style.display = 'block';
+        
+        let html = '';
+        history.forEach((f, i) => {
+            let badgeClass = f.company;
+            if(badgeClass === 'gmb') badgeClass = 'gmb';
+            html += `
+                <div class="card-common fav-card d-flex justify-content-between align-items-center p-3 ${badgeClass}" onclick="loadFromHistory(${i})">
+                    <div>
+                        <div class="mb-1"><span class="badge badge-${badgeClass} me-2">${f.route}</span><span class="small text-muted">往 ${f.dest}</span></div>
+                        <div class="fw-bold fs-5">${f.stopName}</div>
+                    </div>
+                </div>`;
+        });
+        list.innerHTML = html;
+    }
+
+    function loadFromHistory(idx) {
+        const history = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
+        const f = history[idx];
+        if (!f) return;
+        state = { ...f };
+        if (f.company === 'gmb') openGmbEtaModal(f.stopName, f.gmbStopSeq);
+        else openEtaModal(f.stopName, f.kmbStopId, f.ctbStopId);
+    }
+
     async function loadStops(btnEl, route, company, dir, serviceType, destName) {
-        document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
-        if(btnEl) btnEl.classList.add('active-dir');
+        if(btnEl) {
+            document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
+            btnEl.classList.add('active-dir');
+        }
         getEl('loading').style.display = 'block'; getEl('loadingText').innerText = '載入站點...';
         getEl('stopsList').innerHTML = '';
 
@@ -413,8 +481,10 @@
     }
 
     async function loadGmbStops(btnEl, routeCode, routeId, routeSeq, destName, region) {
-        document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
-        if(btnEl) btnEl.classList.add('active-dir');
+        if(btnEl) {
+            document.querySelectorAll('.dir-btn').forEach(b => b.classList.remove('active-dir'));
+            btnEl.classList.add('active-dir');
+        }
         getEl('loading').style.display = 'block'; getEl('loadingText').innerText = '載入站點...';
         getEl('stopsList').innerHTML = '';
 
@@ -431,7 +501,13 @@
 
     async function renderStopsList(stops, destName, company) {
         const list = getEl('stopsList');
-        list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
+        // [New] Back button inserted
+        list.innerHTML = `
+            <div class="d-flex align-items-center mb-3">
+                <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 shadow-sm" onclick="resetToHome()">← 返回首頁</button>
+            </div>
+            <h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>
+        `;
         
         const nameBase = (company === 'ctb') ? CTB_BASE : KMB_BASE;
         const detailPromises = stops.map(async (item) => {
@@ -456,7 +532,13 @@
 
     function renderGmbStopsList(stops, destName) {
         const list = getEl('stopsList');
-        list.innerHTML = `<h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>`;
+        // [New] Back button inserted
+        list.innerHTML = `
+            <div class="d-flex align-items-center mb-3">
+                <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 shadow-sm" onclick="resetToHome()">← 返回首頁</button>
+            </div>
+            <h6 class="px-2 mb-3 fw-bold text-primary border-start border-4 border-primary ps-2">往 ${destName}</h6>
+        `;
         const favs = getFavs();
         let html = '';
         stops.forEach(s => {
@@ -484,7 +566,11 @@
 
     function openEtaModal(name, kmbId, ctbId) {
         if (etaRefreshInterval) clearInterval(etaRefreshInterval);
-        state.stopName = name; // Update current stop name for filter
+        state.stopName = name;
+        // [New] Record history here (Stop Level)
+        state.kmbStopId = kmbId; state.ctbStopId = ctbId;
+        addToHistory(state);
+        
         setupModal(name, state.route, state.dest, state.company);
         updateBusEta(kmbId, ctbId);
         etaRefreshInterval = setInterval(() => { updateBusEta(kmbId, ctbId); }, 60000);
@@ -493,12 +579,15 @@
     function openGmbEtaModal(name, stopSeq) {
         if (etaRefreshInterval) clearInterval(etaRefreshInterval);
         state.stopName = name;
+        // [New] Record history here
+        state.gmbStopSeq = stopSeq;
+        addToHistory(state);
+
         setupModal(name, state.route, state.dest, 'gmb');
         updateGmbEta(stopSeq);
         etaRefreshInterval = setInterval(() => { updateGmbEta(stopSeq); }, 60000);
     }
 
-    // [FIX 2] Cache Busting added: ?t=${Date.now()}
     async function updateBusEta(kmbId, ctbId) {
         const listEl = getEl('etaList');
         const ts = Date.now();
@@ -513,12 +602,9 @@
             }
             const results = await Promise.all(reqs);
             
-            // [FIX 1] Filter out reverse direction AND terminating stop
             const targetDir = state.dir === 'outbound' ? 'O' : 'I';
             const allEtas = results.flat().filter(i => {
-                // Filter 1: Check Route & Direction
                 if (i.route !== state.route || i.dir !== targetDir) return false;
-                // Filter 2: If destination name equals current stop name, it's a terminating bus (Reverse trip arrival)
                 if (i.dest_tc === state.stopName) return false;
                 return true;
             });
