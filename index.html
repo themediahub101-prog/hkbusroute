@@ -213,10 +213,12 @@
     const CTB_BASE = 'https://rt.data.gov.hk/v2/transport/citybus';
     const GMB_BASE = 'https://data.etagmb.gov.hk'; 
     const PERMANENT_STORAGE_KEY = 'hk_transport_user_favorites'; 
-    const HISTORY_STORAGE_KEY = 'hk_transport_user_history_v2'; // 更新 key 以區分舊版歷史
+    const HISTORY_STORAGE_KEY = 'hk_transport_user_history_v2'; 
     const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10'];
 
     let etaRefreshInterval = null;
+    let searchDebounceTimer = null; // [New] Timer for debounce
+
     let state = { 
         company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
         kmbStopId: '', ctbStopId: '', gmbRouteId: '', gmbRouteSeq: '', gmbStopSeq: '', stopName: ''
@@ -236,12 +238,35 @@
         const modalEl = getEl('etaModal');
 
         if (input) {
+            // [New] Real-time Search with Debounce
             input.addEventListener('input', (e) => {
                 const val = e.target.value.trim();
+                
+                // Show/Hide Clear Button
                 clearBtn.style.display = val.length > 0 ? 'block' : 'none';
-                if (val === '') resetToHome();
+                
+                // Clear existing timer
+                if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+
+                // If empty, reset immediately
+                if (val === '') {
+                    resetToHome();
+                    return;
+                }
+
+                // Wait 400ms then search
+                searchDebounceTimer = setTimeout(() => {
+                    handleSearch();
+                }, 400);
             });
-            input.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
+
+            // Keep Enter key as immediate trigger
+            input.addEventListener('keypress', (e) => { 
+                if (e.key === 'Enter') {
+                    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+                    handleSearch();
+                }
+            });
         }
 
         modalEl.addEventListener('hidden.bs.modal', () => {
@@ -267,7 +292,13 @@
     }
 
     function clearSearch() {
-        const input = getEl('routeInput'); input.value = ''; getEl('clearBtn').style.display = 'none'; resetToHome(); input.focus();
+        const input = getEl('routeInput'); 
+        input.value = ''; 
+        getEl('clearBtn').style.display = 'none'; 
+        // [New] Clear timer to prevent search triggering after clear
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        resetToHome(); 
+        input.focus();
     }
 
     function resetToHome() {
@@ -280,6 +311,7 @@
     async function handleSearch() {
         const route = getEl('routeInput').value.trim().toUpperCase();
         if (!route) return;
+        
         getEl('homeContainer').style.display = 'none';
         getEl('loading').style.display = 'block';
         getEl('loadingText').innerText = '正在搜尋...';
@@ -401,7 +433,6 @@
 
     function addToHistory(item) {
         let history = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) || '[]');
-        // Filter existing (based on Stop IDs or Name)
         history = history.filter(h => !(
             h.route === item.route && 
             h.dir === item.dir && 
@@ -501,7 +532,6 @@
 
     async function renderStopsList(stops, destName, company) {
         const list = getEl('stopsList');
-        // [New] Back button inserted
         list.innerHTML = `
             <div class="d-flex align-items-center mb-3">
                 <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 shadow-sm" onclick="resetToHome()">← 返回首頁</button>
@@ -532,7 +562,6 @@
 
     function renderGmbStopsList(stops, destName) {
         const list = getEl('stopsList');
-        // [New] Back button inserted
         list.innerHTML = `
             <div class="d-flex align-items-center mb-3">
                 <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 shadow-sm" onclick="resetToHome()">← 返回首頁</button>
@@ -567,7 +596,6 @@
     function openEtaModal(name, kmbId, ctbId) {
         if (etaRefreshInterval) clearInterval(etaRefreshInterval);
         state.stopName = name;
-        // [New] Record history here (Stop Level)
         state.kmbStopId = kmbId; state.ctbStopId = ctbId;
         addToHistory(state);
         
@@ -579,7 +607,6 @@
     function openGmbEtaModal(name, stopSeq) {
         if (etaRefreshInterval) clearInterval(etaRefreshInterval);
         state.stopName = name;
-        // [New] Record history here
         state.gmbStopSeq = stopSeq;
         addToHistory(state);
 
