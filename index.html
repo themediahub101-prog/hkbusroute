@@ -27,7 +27,7 @@
             z-index: 1000;
             background: rgba(255, 255, 255, 0.98);
             border-bottom: 1px solid rgba(0,0,0,0.05);
-            padding: 15px;
+            padding: 15px 15px 10px 15px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.03);
             border-bottom-left-radius: 20px;
             border-bottom-right-radius: 20px;
@@ -53,13 +53,35 @@
         }
         .clear-btn:active { background-color: #ced4da; }
 
+        .filter-tabs {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .filter-btn {
+            flex: 1;
+            border: 1px solid #dee2e6;
+            background-color: white;
+            color: #6c757d;
+            font-size: 0.9rem;
+            padding: 6px 0;
+            border-radius: 50px;
+            transition: all 0.2s;
+        }
+        .filter-btn.active {
+            background-color: #212529;
+            color: white;
+            border-color: #212529;
+            font-weight: 600;
+        }
+        
         #directionArea {
             display: grid;
             grid-template-columns: 1fr 1fr; 
             gap: 10px;
             max-height: 35vh;
             overflow-y: auto;
-            margin-top: 10px;
+            margin-top: 12px;
             padding-right: 2px;
         }
         #directionArea::-webkit-scrollbar { width: 4px; }
@@ -126,7 +148,7 @@
         .blinking { animation: blinker 1.5s linear infinite; }
         @keyframes blinker { 50% { opacity: 0.5; } }
         .eta-time { font-size: 1.4rem; font-weight: bold; }
-        .eta-remark-only { font-size: 1.2rem; font-weight: bold; color: #6c757d; }
+        .eta-remark-only { font-size: 1.1rem; font-weight: bold; color: #6c757d; }
     </style>
 </head>
 <body>
@@ -141,6 +163,12 @@
             <div id="clearBtn" class="clear-btn" onclick="clearSearch()">×</div>
             <button class="btn btn-primary px-4 fw-bold" onclick="handleSearch()">搜尋</button>
         </div>
+
+        <div class="filter-tabs">
+            <button class="btn filter-btn active" onclick="setFilter('all', this)">全部</button>
+            <button class="btn filter-btn" onclick="setFilter('bus', this)">巴士</button>
+            <button class="btn filter-btn" onclick="setFilter('gmb', this)">小巴</button>
+        </div>
         
         <div id="loading" class="text-center py-2" style="display:none;">
             <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
@@ -151,16 +179,13 @@
     </div>
 
     <div id="homeContainer">
-        
         <div id="historySection" class="fav-section" style="display:none;">
             <div class="fav-title">🕒 最近查看的站點</div>
             <div id="historyList"></div>
         </div>
-
         <div id="sectionDivider" class="px-3 my-3" style="display:none;">
             <hr class="border-secondary opacity-25 m-0">
         </div>
-
         <div id="favoritesSection" class="fav-section">
             <div class="fav-title">★ 經常使用</div>
             <div id="favoritesList">
@@ -217,7 +242,11 @@
     const LEGACY_KEYS = ['hkbus_fav_v12', 'hkbus_fav_v11', 'hkbus_fav_v10'];
 
     let etaRefreshInterval = null;
-    let searchDebounceTimer = null; // [New] Timer for debounce
+    let searchDebounceTimer = null;
+    
+    // [FIX] Search Session ID to prevent race conditions (duplicate results)
+    let currentSearchId = 0; 
+    let currentFilter = 'all';
 
     let state = { 
         company: '', route: '', dir: '', dest: '', serviceType: '', region: '',
@@ -238,29 +267,13 @@
         const modalEl = getEl('etaModal');
 
         if (input) {
-            // [New] Real-time Search with Debounce
             input.addEventListener('input', (e) => {
                 const val = e.target.value.trim();
-                
-                // Show/Hide Clear Button
                 clearBtn.style.display = val.length > 0 ? 'block' : 'none';
-                
-                // Clear existing timer
                 if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-
-                // If empty, reset immediately
-                if (val === '') {
-                    resetToHome();
-                    return;
-                }
-
-                // Wait 400ms then search
-                searchDebounceTimer = setTimeout(() => {
-                    handleSearch();
-                }, 400);
+                if (val === '') { resetToHome(); return; }
+                searchDebounceTimer = setTimeout(() => { handleSearch(); }, 400);
             });
-
-            // Keep Enter key as immediate trigger
             input.addEventListener('keypress', (e) => { 
                 if (e.key === 'Enter') {
                     if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
@@ -291,27 +304,33 @@
         }
     }
 
+    function setFilter(filterType, btnElement) {
+        currentFilter = filterType;
+        document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+        if(btnElement) btnElement.classList.add('active');
+        const val = getEl('routeInput').value.trim();
+        if (val.length > 0) handleSearch();
+    }
+
     function clearSearch() {
-        const input = getEl('routeInput'); 
-        input.value = ''; 
-        getEl('clearBtn').style.display = 'none'; 
-        // [New] Clear timer to prevent search triggering after clear
+        const input = getEl('routeInput'); input.value = ''; getEl('clearBtn').style.display = 'none'; 
         if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-        resetToHome(); 
-        input.focus();
+        resetToHome(); input.focus();
     }
 
     function resetToHome() {
         getEl('directionArea').innerHTML = ''; getEl('stopsList').innerHTML = '';
         getEl('loading').style.display = 'none'; getEl('homeContainer').style.display = 'block';
-        renderFavorites();
-        renderHistory();
+        renderFavorites(); renderHistory();
     }
 
     async function handleSearch() {
         const route = getEl('routeInput').value.trim().toUpperCase();
         if (!route) return;
         
+        // [FIX] Increment Search ID
+        const mySearchId = ++currentSearchId;
+
         getEl('homeContainer').style.display = 'none';
         getEl('loading').style.display = 'block';
         getEl('loadingText').innerText = '正在搜尋...';
@@ -329,6 +348,9 @@
             const pCtb = fetch(`${CTB_BASE}/route/ctb/${route}`).then(r => r.json()).catch(()=>null);
             const [kmbList, gmbListObj, ctbRes] = await Promise.all([pKmb, pGmb, pCtb]);
             
+            // [FIX] Check if this is still the latest search
+            if (mySearchId !== currentSearchId) return;
+
             let hasResult = false;
             let kmbRoutes = [], ctbRoutes = [], gmbMatchedRegions = [];
 
@@ -349,58 +371,68 @@
                 });
             }
 
-            let usedCtbIndices = new Set(); 
-            kmbRoutes.sort((a, b) => (String(a.service_type) === '1' ? -1 : 1));
+            if (currentFilter !== 'gmb') {
+                let usedCtbIndices = new Set(); 
+                kmbRoutes.sort((a, b) => (String(a.service_type) === '1' ? -1 : 1));
 
-            kmbRoutes.forEach(k => {
-                const matchIndex = ctbRoutes.findIndex((c, idx) => 
-                    !usedCtbIndices.has(idx) && c.dir === k.dir && c.dest_tc === k.dest_tc
-                );
-                const sType = String(k.service_type || '');
-                const label = (sType && sType !== '1') ? `<span class="badge bg-secondary ms-1">班次 ${sType}</span>` : '';
-                if (matchIndex !== -1) {
-                    usedCtbIndices.add(matchIndex);
-                    createDirBtn(route, 'joint', k.dir, k.dest_tc, sType, label);
-                } else {
-                    createDirBtn(route, 'kmb', k.dir, k.dest_tc, sType, label);
-                }
-                hasResult = true;
-            });
-
-            ctbRoutes.forEach((c, idx) => {
-                if (!usedCtbIndices.has(idx)) {
-                    createDirBtn(route, 'ctb', c.dir, c.dest_tc, '', '');
+                kmbRoutes.forEach(k => {
+                    const matchIndex = ctbRoutes.findIndex((c, idx) => 
+                        !usedCtbIndices.has(idx) && c.dir === k.dir && c.dest_tc === k.dest_tc
+                    );
+                    const sType = String(k.service_type || '');
+                    const label = (sType && sType !== '1') ? `<span class="badge bg-secondary ms-1">班次 ${sType}</span>` : '';
+                    if (matchIndex !== -1) {
+                        usedCtbIndices.add(matchIndex);
+                        createDirBtn(route, 'joint', k.dir, k.dest_tc, sType, label);
+                    } else {
+                        createDirBtn(route, 'kmb', k.dir, k.dest_tc, sType, label);
+                    }
                     hasResult = true;
-                }
-            });
+                });
 
-            if (gmbMatchedRegions.length > 0) {
-                const gmbDetailReqs = gmbMatchedRegions.map(reg => 
-                    fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
-                );
-                const gmbDetails = await Promise.all(gmbDetailReqs);
-                gmbDetails.forEach((res, idx) => {
-                    if (res && res.data) {
-                        const region = gmbMatchedRegions[idx];
-                        const regionLabel = region === 'HKI' ? '港島' : (region === 'KLN' ? '九龍' : '新界');
-                        res.data.forEach(variation => {
-                            if (variation.directions) {
-                                variation.directions.forEach(d => {
-                                    createGmbBtn(route, variation.route_id, d.route_seq, d.dest_tc, region, regionLabel, variation.description_tc);
-                                    hasResult = true;
-                                });
-                            }
-                        });
+                ctbRoutes.forEach((c, idx) => {
+                    if (!usedCtbIndices.has(idx)) {
+                        createDirBtn(route, 'ctb', c.dir, c.dest_tc, '', '');
+                        hasResult = true;
                     }
                 });
+            }
+
+            if (currentFilter !== 'bus') {
+                if (gmbMatchedRegions.length > 0) {
+                    const gmbDetailReqs = gmbMatchedRegions.map(reg => 
+                        fetch(`${GMB_BASE}/route/${reg}/${route}`).then(r => r.json()).catch(()=>null)
+                    );
+                    const gmbDetails = await Promise.all(gmbDetailReqs);
+                    
+                    // [FIX] Check ID again after second await
+                    if (mySearchId !== currentSearchId) return;
+
+                    gmbDetails.forEach((res, idx) => {
+                        if (res && res.data) {
+                            const region = gmbMatchedRegions[idx];
+                            const regionLabel = region === 'HKI' ? '港島' : (region === 'KLN' ? '九龍' : '新界');
+                            res.data.forEach(variation => {
+                                if (variation.directions) {
+                                    variation.directions.forEach(d => {
+                                        createGmbBtn(route, variation.route_id, d.route_seq, d.dest_tc, region, regionLabel, variation.description_tc);
+                                        hasResult = true;
+                                    });
+                                }
+                            });
+                        }
+                    });
+                }
             }
 
             if (!hasResult) getEl('stopsList').innerHTML = `<div class="text-center text-muted mt-5">找不到路線 ${route}</div>`;
 
         } catch (e) {
-            console.error(e); getEl('stopsList').innerHTML = `<div class="text-center text-danger mt-5">網絡錯誤</div>`;
+            if (mySearchId === currentSearchId) {
+                console.error(e); getEl('stopsList').innerHTML = `<div class="text-center text-danger mt-5">網絡錯誤</div>`;
+            }
         } finally {
-            getEl('loading').style.display = 'none';
+            if (mySearchId === currentSearchId) getEl('loading').style.display = 'none';
         }
     }
 
@@ -632,7 +664,8 @@
             const targetDir = state.dir === 'outbound' ? 'O' : 'I';
             const allEtas = results.flat().filter(i => {
                 if (i.route !== state.route || i.dir !== targetDir) return false;
-                if (i.dest_tc === state.stopName) return false;
+                // [FIX] Ignore if destination is the current stop name (Arrivals at Terminus)
+                if (i.dest_tc && state.stopName && state.stopName.includes(i.dest_tc)) return false;
                 return true;
             });
 
@@ -689,14 +722,20 @@
             const remark = item.rmk_tc || item.remarks_tc || ''; 
             const timeData = item.eta || item.timestamp;
 
-            if (!timeData) {
+            // [FIX] Improved Invalid Date Check
+            let isValidDate = false;
+            let dateObj = null;
+            if (timeData) {
+                dateObj = new Date(timeData);
+                if (!isNaN(dateObj.getTime())) isValidDate = true;
+            }
+
+            if (!isValidDate) {
+                // Show remark ONLY
                 html += `<div class="list-group-item d-flex justify-content-between align-items-center py-3"><div class="d-flex align-items-center">${badge}<span class="eta-remark-only">${remark || '未有班次'}</span></div><div class="text-end text-muted small">往 ${item.dest_tc || state.dest}</div></div>`;
                 return;
             }
             
-            const dateObj = new Date(timeData);
-            if (isNaN(dateObj.getTime())) return;
-
             const min = Math.max(0, Math.floor((dateObj - new Date()) / 60000));
             const timeStr = dateObj.toLocaleTimeString('zh-HK', {hour:'2-digit', minute:'2-digit'});
             let timeColor = (min <= 1) ? 'text-danger blinking' : 'text-success';
